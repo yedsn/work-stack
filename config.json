@@ -1,0 +1,264 @@
+{
+  "programs": [
+    {
+      "name": "业务Dev",
+      "description": "",
+      "category": "业务开发",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://127.0.0.3:10744/hhhhafva",
+            "http://127.0.0.3:3001/dashboard",
+            "https://develop.foisongroup.com/directory/page/directory"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "业务Prod",
+      "description": "",
+      "category": "业务开发",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://127.0.0.2:10744/kpqmclwc",
+            "https://wxsg.foisongroup.com/directory/page/directory",
+            "http://127.0.0.3:3001/dashboard/24"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Business",
+      "description": "",
+      "category": "业务调试",
+      "launch_items": [
+        {
+          "app": "vscode",
+          "params": [
+            "E:\\Workspaces\\git\\kaleb\\business"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Foison06",
+      "description": "",
+      "category": "业务调试",
+      "launch_items": [
+        {
+          "app": "vscode",
+          "params": [
+            "E:\\Workspaces\\git\\kaleb\\business\\foison-script-util\\foison06"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "JianghuJS",
+      "description": "",
+      "category": "江湖JS开发",
+      "launch_items": [
+        {
+          "app": "vscode",
+          "params": [
+            "E:\\Workspaces\\git\\kaleb\\jianghujs"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "OpenJianghu01",
+      "description": "",
+      "category": "江湖JS开发",
+      "launch_items": [
+        {
+          "app": "vscode",
+          "params": [
+            "E:\\Workspaces\\git\\kaleb\\jianghujs\\jianghujs-script-util\\openjianghu01"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "江湖JSDev",
+      "description": "",
+      "category": "江湖JS调试",
+      "launch_items": [
+        {
+          "app": "vscode",
+          "params": [
+            "http://192.168.7.33:10744/ghy2sdop"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "运维",
+      "description": "",
+      "category": "江湖JS调试",
+      "launch_items": [
+        {
+          "app": "vscode",
+          "params": [
+            "http://127.1.0.33:10844/buu9d4tm",
+            "https://127.1.0.33:10744/fhrayqxm",
+            "http://127.2.0.1:10844/vhkf1tuq",
+            "https://127.2.0.1:10744/1s7usc31"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AI",
+      "description": "",
+      "category": "开发辅助",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://mastergo.com/"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Seatable",
+      "description": "",
+      "category": "开发辅助",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://seatable.openjianghu.org/workspace/2/dtable/TASK/?tid=kus7&vid=DSbq",
+            "https://seatable.openjianghu.org/workspace/2/dtable/TASK/?tid=wJO4&vid=DSbq",
+            "https://seatable.openjianghu.org/workspace/36/dtable/TASK/?tid=0000&vid=qXfm",
+            "https://seatable.openjianghu.org/workspace/36/dtable/TASK/?tid=BvBe&vid=0000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Figma",
+      "description": "",
+      "category": "开发辅助",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://www.figma.com/files/team/983090456482159383/recents-and-sharing?fuid=983090449557647951",
+            "https://www.figma.com/design/OMPZdRLid6w8gHbTzhtdbw/%E8%A7%84%E8%8C%83?node-id=91-54&p=f&t=wsrTIFTKWUQEmHFl-0",
+            "https://www.figma.com/design/pjTkAIVGOUvhBMHyxjOP7V/%E9%A3%8E%E7%A5%9E?node-id=1148-3&p=f&t=THoDBVaXl6wzEJ1Z-0"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "开发文档",
+      "description": "",
+      "category": "开发文档",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://pictogrammers.github.io/@mdi/font/7.0.96/",
+            "https://mozilla.github.io/nunjucks/cn/templating.html",
+            "https://www.lodashjs.com/docs/lodash.isUndefined#_isundefinedvalue",
+            "https://v2.vuetifyjs.com/zh-Hans/components/date-pickers/#section-830356f4",
+            "https://www.jyshare.com/front-end/854/?optionGlobl=global",
+            "https://www.h-ui.net/lib/layer.js.shtml",
+            "https://uviewui.com/components/datetimePicker.html",
+            "https://knexjs.org/guide/raw.html#raw-queries",
+            "https://www.tailwindcss.cn/docs/line-height",
+            "https://lottiefiles.com/",
+            "https://www.openjianghu.org/doc/page/article/11101"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "我的文档-编程",
+      "description": "",
+      "category": "开发文档",
+      "launch_items": [
+        {
+          "app": "C:/Users/yedsn/AppData/Local/Obsidian/Obsidian.exe",
+          "params": [
+            "E:\\Seafile\\yedsn\\我的资料库\\私人资料库\\文档\\Obsidian\\我的文档-编程"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "记录文档",
+      "description": "",
+      "category": "日常文档",
+      "launch_items": [
+        {
+          "app": "edge",
+          "params": [
+            "https://seatable.hxj.life/workspace/1/dtable/%E6%97%A5%E5%B8%B8%E8%AE%B0%E5%BD%95/?tid=0000&vid=0000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "我的文档-工作",
+      "description": "",
+      "category": "日常文档",
+      "launch_items": [
+        {
+          "app": "C:/Users/yedsn/AppData/Local/Obsidian/Obsidian.exe",
+          "params": [
+            "E:\\Seafile\\yedsn\\我的资料库\\私人资料库\\文档\\Obsidian\\我的文档-工作"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "我的文档-副业",
+      "description": "",
+      "category": "学习",
+      "launch_items": [
+        {
+          "app": "C:/Users/yedsn/AppData/Local/Obsidian/Obsidian.exe",
+          "params": [
+            "E:\\Seafile\\yedsn\\我的资料库\\私人资料库\\文档\\Obsidian\\我的文档-副业"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "我的文档-家庭",
+      "description": "",
+      "category": "生活",
+      "launch_items": [
+        {
+          "app": "C:/Users/yedsn/AppData/Local/Obsidian/Obsidian.exe",
+          "params": [
+            "E:\\Seafile\\yedsn\\我的资料库\\私人资料库\\文档\\Obsidian\\我的文档-家庭"
+          ]
+        }
+      ]
+    }
+  ],
+  "categories": [
+    "全部",
+    "业务开发",
+    "业务调试",
+    "江湖JS开发",
+    "江湖JS调试",
+    "开发辅助",
+    "开发文档",
+    "日常文档",
+    "学习",
+    "生活",
+    "娱乐"
+  ],
+  "window_size": {
+    "width": 1338,
+    "height": 845
+  }
+}

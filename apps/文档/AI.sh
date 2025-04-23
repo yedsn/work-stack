@@ -1,0 +1,1 @@
+用Edge打开https://www.deepseek.com/chat
