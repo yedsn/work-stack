@@ -1,0 +1,55 @@
+altgraph==0.17.4
+attrs==25.3.0
+beautifulsoup4==4.13.4
+bs4==0.0.2
+certifi==2025.1.31
+cffi==1.17.1
+charset-normalizer==3.4.1
+colorama==0.4.6
+customtkinter==5.2.2
+darkdetect==0.8.0
+et-xmlfile==1.1.0
+h11==0.14.0
+idna==3.10
+keyboard==0.13.5
+MouseInfo==0.1.3
+openpyxl==3.1.5
+outcome==1.3.0.post0
+packaging==24.2
+pefile==2023.2.7
+pillow==10.2.0
+psutil>=5.9.0
+PyAutoGUI==0.9.54
+pycparser==2.22
+PyGetWindow==0.0.9
+pyinstaller==6.11.1
+pyinstaller-hooks-contrib==2025.0
+PyMsgBox==1.0.9
+pyperclip==1.9.0
+PyQt5>=5.15.0
+PyQt5-Qt5==5.15.2
+PyQt5_sip==12.16.1
+PyRect==0.2.0
+PyScreeze==1.0.1
+PySocks==1.7.1
+pystray==0.19.5
+pytweening==1.2.0
+pywin32>=300; platform_system == "Windows"
+pywin32-ctypes==0.2.3; sys_platform == 'win32'
+pyobjc==10.1; sys_platform == 'darwin'  # macOS 全局热键支持
+python-xlib==0.33; sys_platform == 'linux'  # Linux 全局热键支持
+requests>=2.25.0
+selenium==4.31.0
+setuptools==75.8.0
+six==1.17.0
+sniffio==1.3.1
+sortedcontainers==2.4.0
+soupsieve==2.7
+trio==0.30.0
+trio-websocket==0.12.2
+ttkbootstrap==0.4.0
+typing_extensions==4.13.2
+urllib3==2.4.0
+websocket-client==1.8.0
+websockets==15.0.1
+wsproto==1.2.0

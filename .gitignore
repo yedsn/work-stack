@@ -1,2 +1,7 @@
 __pycache__
 *.pyc
+/build
+/dist
+/logs
+config.json
+/config_history

@@ -65,23 +65,28 @@ class FlowLayout(QLayout):
         x = rect.x()
         y = rect.y()
         lineHeight = 0
+        maxWidth = rect.width()  # 获取可用最大宽度
         
         for item in self.items:
             wid = item.widget()
+            # 确保每个部件宽度不超过可用宽度
+            itemWidth = min(item.sizeHint().width(), maxWidth)
+            
             spaceX = self.spacing() + wid.style().layoutSpacing(
                 QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Horizontal)
             spaceY = self.spacing() + wid.style().layoutSpacing(
                 QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Vertical)
             
-            nextX = x + item.sizeHint().width() + spaceX
+            nextX = x + itemWidth + spaceX
             if nextX - spaceX > rect.right() and lineHeight > 0:
                 x = rect.x()
                 y = y + lineHeight + spaceY
-                nextX = x + item.sizeHint().width() + spaceX
+                nextX = x + itemWidth + spaceX
                 lineHeight = 0
                 
             if not testOnly:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+                itemRect = QRect(QPoint(x, y), QSize(itemWidth, item.sizeHint().height()))
+                item.setGeometry(itemRect)
                 
             x = nextX
             lineHeight = max(lineHeight, item.sizeHint().height())

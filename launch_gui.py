@@ -294,7 +294,7 @@ class LaunchGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("应用启动器")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(1200, 800)
         
         # 创建中央部件
         central_widget = QWidget()

@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QScrollArea,
                            QMenu, QAction, QInputDialog, QMessageBox, QApplication, QDialog, QHBoxLayout, QLineEdit, QPushButton, QLabel, QFileDialog, QFrame, QAbstractItemView)
 from PyQt5.QtCore import Qt, QPoint
 from gui.launch_item import LaunchItem
+from PyQt5.QtGui import QFont
 
 class CategoryTab(QWidget):
     """分类标签页"""
@@ -13,48 +14,186 @@ class CategoryTab(QWidget):
         super().__init__()
         self.category_name = category_name
         self.main_window = None
+        self.title_label = None
+        self.separator = None
         
         # 创建布局
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        
+        import sys
+        if sys.platform == 'darwin':
+            # Mac特定布局设置 - 更接近Windows版本，更紧凑
+            layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距
+            layout.setSpacing(5)  # 减小间距
+        else:
+            # Windows平台更紧凑的布局
+            layout.setContentsMargins(8, 8, 8, 8)  # 减小内边距
+            layout.setSpacing(8)  # 减小间距
         
         # 创建滚动区域
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setAlignment(Qt.AlignHCenter | Qt.AlignTop)  # 水平居中和顶部对齐
+        
+        # 保存滚动位置
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self.save_scroll_position)
+        self.scroll_position = 0
         
         # 创建内容控件
         content_widget = QWidget()
-        self.content_layout = QVBoxLayout(content_widget)
-        self.content_layout.setAlignment(Qt.AlignTop)
-        self.content_layout.setSpacing(10)
+        content_widget.setStyleSheet("background-color: white;")
+        content_widget.setMinimumWidth(500)  # 设置最小宽度防止内容挤压
         
-        scroll_area.setWidget(content_widget)
-        layout.addWidget(scroll_area)
+        # 创建内容的主布局（改用垂直布局）
+        main_content_layout = QVBoxLayout(content_widget)
+        main_content_layout.setContentsMargins(5, 5, 5, 5)  # 设置相同的左右边距
+        main_content_layout.setSpacing(0)
+        
+        # 创建内容区域用于存放列表项
+        items_widget = QWidget()
+        # Mac上根据内容自动调整大小，不设置较大的最小高度
+        if sys.platform == 'darwin':
+            items_widget.setMinimumHeight(50)  # 减小最小高度，根据内容自动调整
+        else:
+            # Windows平台也使用较小的最小高度，让内容自适应
+            items_widget.setMinimumHeight(50)  # 减小最小高度
+            
+        self.content_layout = QVBoxLayout(items_widget)
+        self.content_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)  # 确保列表项居上对齐和水平居中
+        
+        if sys.platform == 'darwin':
+            # Mac特定内容布局设置 - 更接近Windows版本
+            self.content_layout.setSpacing(8)  # 减小间距
+            self.content_layout.setContentsMargins(3, 3, 3, 3)  # 设置相同的左右边距
+            
+            # 添加空列表提示（初始隐藏）
+            self.empty_label = QLabel("暂无内容")
+            self.empty_label.setAlignment(Qt.AlignCenter)
+            self.empty_label.setStyleSheet("color: #999999; font-size: 14px; padding: 10px;")  # 减少padding
+            self.empty_label.hide()  # 默认隐藏
+            self.content_layout.addWidget(self.empty_label)
+            
+            # 设置滚动区域样式
+            self.scroll_area.setStyleSheet("""
+                QScrollArea {
+                    background-color: white;
+                    border: none;
+                }
+                QScrollBar:vertical {
+                    background: #f0f0f0;
+                    width: 10px;  /* 更紧凑的滚动条 */
+                    margin: 0px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #c0c0c0;
+                    min-height: 20px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #a0a0a0;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+            """)
+        else:
+            # Windows平台更紧凑的布局
+            self.content_layout.setSpacing(8)  # 减小间距
+            self.content_layout.setContentsMargins(3, 3, 3, 3)  # 设置相同的左右边距
+            
+            # 添加空列表提示（初始隐藏）
+            self.empty_label = QLabel("暂无内容")
+            self.empty_label.setAlignment(Qt.AlignCenter)
+            self.empty_label.setStyleSheet("color: #999999; font-size: 14px; padding: 20px;")
+            self.empty_label.hide()  # 默认隐藏
+            self.content_layout.addWidget(self.empty_label)
+        
+        # 将列表项区域添加到主布局
+        main_content_layout.addWidget(items_widget)
+        
+        # 添加空白区域到底部（使用伸展因子）
+        main_content_layout.addStretch(1)
+        
+        self.scroll_area.setWidget(content_widget)
+        layout.addWidget(self.scroll_area)
+        
+        # 确保内容控件宽度至少与滚动区域一样宽
+        content_widget.setMinimumWidth(self.scroll_area.viewport().width())
         
         # 存储选中的项目
         self.selected_items = []
+        
+        # 检查是否为空列表
+        self.check_empty_list()
     
     def set_main_window(self, main_window):
         """设置主窗口引用"""
         self.main_window = main_window
     
+    def save_scroll_position(self, value):
+        """保存滚动条位置"""
+        self.scroll_position = value
+        
+    def restore_scroll_position(self):
+        """恢复滚动条位置"""
+        self.scroll_area.verticalScrollBar().setValue(self.scroll_position)
+    
+    def reset_scroll_position(self):
+        """重置滚动条到顶部"""
+        self.scroll_area.verticalScrollBar().setValue(0)
+    
     def add_launch_item(self, name, app, params):
         """添加启动项"""
+        # 保存当前滚动位置
+        scroll_val = self.scroll_area.verticalScrollBar().value()
+        
+        # 创建并添加新项目
         item = LaunchItem(name, app, params)
         item.set_category_tab(self)
+        
+        # 确保每个项目都能接收焦点和键盘事件
+        item.setFocusPolicy(Qt.StrongFocus)
+        
+        # 如果主窗口存在，为项目安装事件过滤器
+        if self.main_window:
+            item.installEventFilter(self.main_window)
         
         # 设置右键菜单
         item.setContextMenuPolicy(Qt.CustomContextMenu)
         item.customContextMenuRequested.connect(lambda pos, i=item: self.show_item_context_menu(pos, i))
         
-        self.content_layout.addWidget(item)
+        # 将新项目添加到顶部
+        self.content_layout.insertWidget(0, item)
+        
+        # 确保滚动条位于顶部
+        self.reset_scroll_position()
+        
+        # 检查是否需要隐藏空列表提示
+        self.check_empty_list()
+        
+        # 在Mac上调整主窗口大小以适应内容
+        import sys
+        if sys.platform == 'darwin' and self.main_window:
+            self.main_window.adjustSize()
+        
         return item
     
     def remove_launch_item(self, item):
         """移除启动项"""
         self.content_layout.removeWidget(item)
         item.deleteLater()
+        
+        # 检查是否需要显示空列表提示
+        self.check_empty_list()
+        
+        # 在Mac上调整主窗口大小以适应内容
+        import sys
+        if sys.platform == 'darwin' and self.main_window:
+            # 延迟一点执行，确保UI已更新
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, self.main_window.adjustSize)
     
     def show_item_context_menu(self, position, item):
         """显示启动项右键菜单"""
@@ -404,6 +543,9 @@ class CategoryTab(QWidget):
             # 更新配置
             if self.main_window:
                 self.main_window.update_config()
+            
+            # 确保检查空列表状态
+            self.check_empty_list()
 
     def move_selected_items_to_category(self, target_category):
         """将所有选中的项目移动到指定分类"""
@@ -449,6 +591,14 @@ class CategoryTab(QWidget):
         
         # 更新配置，但不再触发全部更新
         self.main_window.update_config(skip_all_update=True)
+        
+        # 检查是否需要显示空列表提示
+        self.check_empty_list()
+        
+        # 如果目标分类在当前标签页中，也检查目标分类的空列表状态
+        if target_category in self.main_window.tabs:
+            target_tab = self.main_window.tabs[target_category]
+            target_tab.check_empty_list()
 
     def duplicate_selected_items(self):
         """复制所有选中的项目"""
@@ -472,3 +622,36 @@ class CategoryTab(QWidget):
         # 可以添加一个状态栏提示
         if self.main_window and hasattr(self.main_window, "statusBar"):
             self.main_window.statusBar().showMessage(f"已创建 {len(items_to_duplicate)} 个项目副本", 2000)
+
+    def check_empty_list(self):
+        """检查是否为空列表并显示相应提示"""
+        # 计算列表项数量（排除标题和分隔线）
+        item_count = 0
+        for i in range(self.content_layout.count()):
+            widget = self.content_layout.itemAt(i).widget()
+            if isinstance(widget, LaunchItem):
+                item_count += 1
+        
+        # 根据是否有列表项显示或隐藏空列表提示
+        if item_count == 0:
+            self.empty_label.show()
+        else:
+            self.empty_label.hide()
+
+        # 在Mac上根据项目数量调整窗口大小
+        import sys
+        if sys.platform == 'darwin' and self.main_window:
+            # 延迟一点执行，确保UI已更新
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, self.main_window.adjustSize)
+
+    def resizeEvent(self, event):
+        """重写调整大小事件，确保内容宽度正确"""
+        super().resizeEvent(event)
+        # 获取滚动区域的可视区域宽度
+        viewport_width = self.scroll_area.viewport().width()
+        # 获取内容控件
+        content_widget = self.scroll_area.widget()
+        if content_widget:
+            # 设置内容控件的最小宽度为滚动区域视口宽度
+            content_widget.setMinimumWidth(viewport_width - 20)

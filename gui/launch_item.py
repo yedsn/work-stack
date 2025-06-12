@@ -4,31 +4,36 @@
 import os
 import subprocess
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QPushButton, QApplication, QFrame, QGraphicsDropShadowEffect, QMenu)
+                           QPushButton, QApplication, QFrame, QGraphicsDropShadowEffect, QMenu, QSizePolicy)
 from PyQt5.QtCore import Qt, QMimeData
 from PyQt5.QtGui import QDrag, QPixmap, QFont, QCursor, QColor
 from utils.app_launcher import open_app
 from gui.flow_layout import FlowLayout
+from utils.logger import get_logger
+from utils.platform_settings import (is_windows, is_mac, is_linux, 
+                                    get_platform_style, get_platform_setting)
+
+# 获取日志记录器
+logger = get_logger()
 
 class ParamLabel(QLabel):
     """可点击的参数标签"""
     def __init__(self, param, parent=None):
+        # 处理空字符串参数
+        if not param:
+            param = "<空>"
         super().__init__(param, parent)
         self.param = param
         self.setCursor(QCursor(Qt.PointingHandCursor))
-        self.setStyleSheet("""
-            QLabel {
-                color: #0066cc;
-                text-decoration: underline;
-                padding: 2px 5px;
-                background-color: #f0f0f0;
-                border-radius: 3px;
-                margin-right: 5px;
-            }
-            QLabel:hover {
-                background-color: #e0e0e0;
-            }
-        """)
+
+        # 使用平台特定样式
+        self.setStyleSheet(get_platform_style('param_label'))
+        
+        # 设置适合当前平台的字体大小
+        font = self.font()
+        font_size = get_platform_setting('font_sizes.param_label')
+        font.setPointSize(font_size)
+        self.setFont(font)
 
 class LaunchItem(QFrame):
     """启动项组件"""
@@ -41,12 +46,13 @@ class LaunchItem(QFrame):
         self.source_category = source_category  # 添加所属分类属性
         self.is_selected = False  # 添加选中状态
         
-        # 打印调试信息
-        print(f"创建启动项: 名称={name}, 应用={app}, 参数={params}")
+        # 记录创建启动项的日志
+        logger.debug(f"创建启动项: 名称={name}, 应用={app}, 参数={params}")
         
-        # 设置为卡片样式
+        # 设置为卡片样式并添加阴影效果
         self.setFrameShape(QFrame.StyledPanel)
         self.setFrameShadow(QFrame.Raised)
+        self.setFocusPolicy(Qt.StrongFocus)  # 确保可以接收焦点和键盘事件
         
         # 添加阴影效果
         shadow = QGraphicsDropShadowEffect()
@@ -57,54 +63,94 @@ class LaunchItem(QFrame):
         
         # 创建主布局
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(8)
         
-        # 创建标题布局
-        title_layout = QHBoxLayout()
+        # 根据平台设置布局边距和间距
+        margins = get_platform_setting('layouts.launch_item_margins')
+        spacing = get_platform_setting('layouts.launch_item_spacing')
+        main_layout.setContentsMargins(*margins)
+        main_layout.setSpacing(spacing)
         
-        # 创建标题标签
-        title_label = QLabel(name)
+        # 确保整个内容区域不会超出父控件范围
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        
+        # 创建标题栏
+        title_bar = QFrame()
+        title_bar.setStyleSheet("""
+            background-color: #f0f0f0;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+        """)
+        title_bar_layout = QHBoxLayout(title_bar)
+        title_bar_layout.setContentsMargins(10, 15, 10, 15)  # 增加标题栏内边距
+        
+        # 创建标题标签，根据平台处理长标题
+        title_name = name
+        # 如果名称过长，根据平台设置截断显示
+        max_title_length = get_platform_setting('max_title_length')
+        if max_title_length and len(title_name) > max_title_length:
+            title_name = title_name[:max_title_length-2] + "..."
+            
+        title_label = QLabel(title_name)
         title_font = QFont()
         title_font.setBold(True)
-        title_font.setPointSize(12)
+        title_font.setPointSize(get_platform_setting('font_sizes.title'))
         title_label.setFont(title_font)
+        title_label.setStyleSheet("color: black; background-color: transparent;")
         
-        # 添加到标题布局
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
+        # 添加到标题栏布局
+        title_bar_layout.addWidget(title_label)
+        title_bar_layout.addStretch()
         
-        # 添加标题布局到主布局
-        main_layout.addLayout(title_layout)
+        # 添加标题栏到主布局
+        main_layout.addWidget(title_bar)
+        
+        # 创建内容区域
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        
+        # 根据平台设置内容区域边距和间距
+        content_margins = get_platform_setting('layouts.content_margins')
+        content_spacing = get_platform_setting('layouts.content_spacing')
+        content_layout.setContentsMargins(*content_margins)
+        content_layout.setSpacing(content_spacing)
         
         # 应用信息
         app_name = os.path.basename(app) if os.path.isabs(app) else app
         app_label = QLabel(f"应用: {app_name}")
-        app_label.setStyleSheet("color: gray;")
-        main_layout.addWidget(app_label)
+        app_label.setStyleSheet(get_platform_style('app_label'))
+        app_font = app_label.font()
+        app_font.setPointSize(get_platform_setting('font_sizes.app_label'))
+        app_label.setFont(app_font)
+        content_layout.addWidget(app_label)
         
         # 如果有所属分类且不是在原分类中显示，则显示分类信息
         if source_category:
             category_label = QLabel(f"分类: {source_category}")
-            category_label.setStyleSheet("color: #4a86e8; font-style: italic;")
-            main_layout.addWidget(category_label)
+            category_label.setStyleSheet(get_platform_style('category_label'))
+            category_font = category_label.font()
+            category_font.setPointSize(get_platform_setting('font_sizes.category_label'))
+            category_label.setFont(category_font)
+            content_layout.addWidget(category_label)
         
         # 参数信息
         if params:
             params_layout = QVBoxLayout()
-            params_layout.setSpacing(5)
-            params_layout.setContentsMargins(0, 5, 0, 5)
+            params_layout.setSpacing(get_platform_setting('layouts.params_spacing'))
+            params_layout.setContentsMargins(0, get_platform_setting('layouts.params_top_margin'), 0, 0)
             
             params_header = QHBoxLayout()
             params_label = QLabel("参数:")
-            params_label.setStyleSheet("color: gray;")
+            params_label.setStyleSheet(get_platform_style('params_label'))
+            params_font = params_label.font()
+            params_font.setPointSize(get_platform_setting('font_sizes.params_label'))
+            params_label.setFont(params_font)
             params_header.addWidget(params_label)
             params_header.addStretch()
             params_layout.addLayout(params_header)
             
             # 创建流式布局容器
             flow_layout = FlowLayout()
-            flow_layout.setSpacing(5)
+            flow_layout.setSpacing(get_platform_setting('layouts.param_labels_spacing'))
             
             # 添加每个参数作为可点击的标签
             for param in params:
@@ -114,23 +160,42 @@ class LaunchItem(QFrame):
             
             # 将流式布局添加到参数布局
             params_layout.addLayout(flow_layout)
-            main_layout.addLayout(params_layout)
+            content_layout.addLayout(params_layout)
+        
+        # 添加内容区域到主布局
+        main_layout.addWidget(content_widget)
+        main_layout.setStretch(1, 1)  # 让内容区域填充剩余空间
         
         # 设置样式
-        self.setStyleSheet("""
-            LaunchItem {
-                background-color: white;
-                border: 1px solid #dddddd;
-                border-radius: 5px;
-            }
-            LaunchItem:hover {
-                background-color: #f0f8ff;
-                border: 1px solid #4a86e8;
-            }
-        """)
+        self.setStyleSheet(get_platform_style('launch_item'))
         
-        # 设置固定高度
-        self.setMinimumHeight(100)
+        # 根据内容自动调整高度
+        base_height = get_platform_setting('base_heights.launch_item')
+        
+        if source_category:
+            base_height += get_platform_setting('base_heights.category_add')
+        
+        if params:
+            # 参数数量和复杂度会影响高度，根据平台计算参数部分高度
+            param_count_threshold = get_platform_setting('param_count_threshold')
+            param_height_base = get_platform_setting('base_heights.param_base')
+            param_height_per_row = get_platform_setting('base_heights.param_per_row')
+            
+            param_height = param_height_base
+            if len(params) > param_count_threshold:
+                # 计算额外行数，假设每行约3个参数
+                extra_rows = (len(params) - param_count_threshold) // 3
+                param_height += extra_rows * param_height_per_row
+            
+            base_height += param_height
+        
+        self.setMinimumHeight(base_height)
+        # 不设置最大高度，让内容自适应
+        self.setMaximumHeight(16777215)  # Qt默认的最大值
+        
+        # 让布局自动调整内容高度
+        content_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         
         # 启用鼠标跟踪
         self.setMouseTracking(True)
@@ -148,51 +213,89 @@ class LaunchItem(QFrame):
     def update_display(self):
         """更新显示内容"""
         # 更新标题
-        title_layout = self.layout().itemAt(0).layout()
-        title_label = title_layout.itemAt(0).widget()
-        title_label.setText(self.name)
+        if self.layout().count() > 0:
+            title_bar = self.layout().itemAt(0).widget()
+            if title_bar and title_bar.layout() and title_bar.layout().count() > 0:
+                title_label = title_bar.layout().itemAt(0).widget()
+                if title_label and isinstance(title_label, QLabel):
+                    # 如果名称过长，根据平台设置截断显示
+                    title_name = self.name
+                    max_title_length = get_platform_setting('max_title_length')
+                    if max_title_length and len(title_name) > max_title_length:
+                        title_name = title_name[:max_title_length-2] + "..."
+                    title_label.setText(title_name)
         
-        # 更新应用信息
-        app_label = self.layout().itemAt(1).widget()
-        app_name = os.path.basename(self.app) if os.path.isabs(self.app) else self.app
-        app_label.setText(f"应用: {app_name}")
-        
-        # 更新参数信息 - 需要重建参数布局
-        if self.layout().count() > 2:
-            # 移除旧的参数布局
-            old_params_layout = self.layout().itemAt(2)
-            if old_params_layout:
-                # 删除旧布局中的所有控件
-                self._clear_layout(old_params_layout.layout())
-                # 从主布局中移除
-                self.layout().removeItem(old_params_layout)
-        
-        # 如果有参数，创建新的参数布局
-        if self.params:
-            params_layout = QVBoxLayout()
-            params_layout.setSpacing(5)
-            params_layout.setContentsMargins(0, 5, 0, 5)
-            
-            params_header = QHBoxLayout()
-            params_label = QLabel("参数:")
-            params_label.setStyleSheet("color: gray;")
-            params_header.addWidget(params_label)
-            params_header.addStretch()
-            params_layout.addLayout(params_header)
-            
-            # 创建流式布局容器
-            flow_layout = FlowLayout()
-            flow_layout.setSpacing(5)
-            
-            # 添加每个参数作为可点击的标签
-            for param in self.params:
-                param_label = ParamLabel(str(param))
-                param_label.mousePressEvent = lambda event, p=param: self.launch_with_param(p)
-                flow_layout.addWidget(param_label)
-            
-            # 将流式布局添加到参数布局
-            params_layout.addLayout(flow_layout)
-            self.layout().addLayout(params_layout)
+        # 更新内容区域
+        if self.layout().count() > 1:
+            content_widget = self.layout().itemAt(1).widget()
+            if content_widget and content_widget.layout():
+                content_layout = content_widget.layout()
+                
+                # 更新应用信息
+                if content_layout.count() > 0:
+                    app_label = content_layout.itemAt(0).widget()
+                    if app_label and isinstance(app_label, QLabel):
+                        app_name = os.path.basename(self.app) if os.path.isabs(self.app) else self.app
+                        app_label.setText(f"应用: {app_name}")
+                        app_label.setStyleSheet(get_platform_style('app_label'))
+                        app_font = app_label.font()
+                        app_font.setPointSize(get_platform_setting('font_sizes.app_label'))
+                        app_label.setFont(app_font)
+                
+                # 更新参数信息 - 需要移除旧的参数布局并创建新的
+                # 首先找到参数布局的索引
+                params_layout_index = -1
+                for i in range(content_layout.count()):
+                    item = content_layout.itemAt(i)
+                    if item.layout():
+                        # 这可能是参数布局
+                        for j in range(item.layout().count()):
+                            subitem = item.layout().itemAt(j)
+                            if subitem.widget() and isinstance(subitem.widget(), QLabel) and subitem.widget().text() == "参数:":
+                                params_layout_index = i
+                                break
+                
+                # 如果找到了参数布局，移除它
+                if params_layout_index >= 0:
+                    params_layout = content_layout.itemAt(params_layout_index).layout()
+                    self._clear_layout(params_layout)
+                    # 移除空的布局
+                    widget = content_layout.itemAt(params_layout_index).widget()
+                    if widget:
+                        content_layout.removeWidget(widget)
+                        widget.deleteLater()
+                
+                # 如果有参数，添加新的参数布局
+                if self.params:
+                    params_layout = QVBoxLayout()
+                    params_layout.setSpacing(get_platform_setting('layouts.params_spacing'))
+                    params_layout.setContentsMargins(0, get_platform_setting('layouts.params_top_margin'), 0, 0)
+                    
+                    params_header = QHBoxLayout()
+                    params_label = QLabel("参数:")
+                    params_label.setStyleSheet(get_platform_style('params_label'))
+                    params_font = params_label.font()
+                    params_font.setPointSize(get_platform_setting('font_sizes.params_label'))
+                    params_label.setFont(params_font)
+                    params_header.addWidget(params_label)
+                    params_header.addStretch()
+                    params_layout.addLayout(params_header)
+                    
+                    # 创建流式布局容器
+                    flow_layout = FlowLayout()
+                    flow_layout.setSpacing(get_platform_setting('layouts.param_labels_spacing'))
+                    
+                    # 添加每个参数作为可点击的标签
+                    for param in self.params:
+                        param_label = ParamLabel(str(param))
+                        param_label.mousePressEvent = lambda event, p=param: self.launch_with_param(p)
+                        flow_layout.addWidget(param_label)
+                    
+                    # 将流式布局添加到参数布局
+                    params_layout.addLayout(flow_layout)
+                    
+                    # 添加参数布局到内容布局
+                    content_layout.addLayout(params_layout)
     
     def _clear_layout(self, layout):
         """清空布局中的所有控件"""
@@ -213,18 +316,18 @@ class LaunchItem(QFrame):
         """启动应用"""
         try:
             open_app(self.app, self.params)
-            print(f"成功启动应用: {self.app}")
+            logger.info(f"启动应用: {self.app}")
         except Exception as e:
-            print(f"启动应用失败: {self.app}, 错误: {str(e)}")
+            logger.error(f"启动应用失败: {self.app}, 错误: {str(e)}")
     
     def launch_with_param(self, param):
         """使用单个参数启动应用"""
         try:
             from utils.app_launcher import open_app
             open_app(self.app, [param])
-            print(f"成功启动应用(单参数): {self.app} {param}")
+            logger.info(f"启动应用(单参数): {self.app} {param}")
         except Exception as e:
-            print(f"启动应用失败(单参数): {self.app} {param}, 错误: {str(e)}")
+            logger.error(f"启动应用失败(单参数): {self.app} {param}, 错误: {str(e)}")
     
     def mouseDoubleClickEvent(self, event):
         """双击启动应用"""
@@ -316,36 +419,69 @@ class LaunchItem(QFrame):
     
     def set_selected(self, selected):
         """设置选中状态"""
+        if self.is_selected == selected:
+            return  # 状态没有变化，不需要处理
+        
         self.is_selected = selected
         
-        if selected:
-            self.setStyleSheet("""
-                LaunchItem {
-                    background-color: #e6f0ff;
-                    border: 2px solid #4a86e8;
-                    border-radius: 5px;
-                }
-            """)
-            
-            # 添加到选中列表
-            if self.category_tab and self not in self.category_tab.selected_items:
+        # 设置样式
+        self._update_selection_style()
+        
+        # 更新选中列表
+        if self.category_tab:
+            if selected and self not in self.category_tab.selected_items:
                 self.category_tab.selected_items.append(self)
-        else:
+            elif not selected and self in self.category_tab.selected_items:
+                self.category_tab.selected_items.remove(self)
+    
+    def _update_selection_style(self):
+        """更新选中状态的样式"""
+        # 设置主框架样式
+        if self.is_selected:
             self.setStyleSheet("""
                 LaunchItem {
-                    background-color: white;
-                    border: 1px solid #dddddd;
-                    border-radius: 5px;
-                }
-                LaunchItem:hover {
-                    background-color: #f0f8ff;
-                    border: 1px solid #4a86e8;
+                    background-color: #e6f7ff;
+                    border: 2px solid #1890ff;
+                    border-radius: 6px;
                 }
             """)
-            
-            # 从选中列表中移除
-            if self.category_tab and self in self.category_tab.selected_items:
-                self.category_tab.selected_items.remove(self)
+        else:
+            self.setStyleSheet("")
+        
+        # 更新标题栏样式
+        if self.layout().count() > 0:
+            title_bar = self.layout().itemAt(0).widget()
+            if title_bar:
+                bg_color = "#bae7ff" if self.is_selected else "#f0f0f0"
+                title_bar.setStyleSheet(f"""
+                    background-color: {bg_color};
+                    border-top-left-radius: 6px;
+                    border-top-right-radius: 6px;
+                """)
+        
+        # 更新参数标签样式
+        self._update_param_labels_style()
+    
+    def _update_param_labels_style(self):
+        """更新参数标签样式"""
+        # 查找参数布局
+        if self.layout().count() > 1:
+            content_widget = self.layout().itemAt(1).widget()
+            if content_widget and content_widget.layout():
+                content_layout = content_widget.layout()
+                for i in range(content_layout.count()):
+                    item = content_layout.itemAt(i)
+                    if item.layout():
+                        # 查找参数布局
+                        for j in range(item.layout().count()):
+                            subitem = item.layout().itemAt(j)
+                            if subitem.layout():
+                                # 查找流式布局
+                                flow_layout = subitem.layout()
+                                for k in range(flow_layout.count()):
+                                    param_widget = flow_layout.itemAt(k).widget()
+                                    if isinstance(param_widget, ParamLabel):
+                                        param_widget.setStyleSheet(get_platform_style('param_label_selected' if self.is_selected else 'param_label'))
     
     def contextMenuEvent(self, event):
         """右键菜单事件"""
@@ -365,4 +501,52 @@ class LaunchItem(QFrame):
             self.category_tab.show_item_context_menu(event.pos(), self)
         
         menu = QMenu(self)
-        menu.exec_(event.globalPos()) 
+        menu.exec_(event.globalPos())
+
+    def keyPressEvent(self, event):
+        """处理键盘按键事件"""
+        # 回车键直接启动应用
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            self.launch()
+            return
+        
+        # 上下键事件让父窗口处理，以便进行导航
+        if event.key() == Qt.Key_Up or event.key() == Qt.Key_Down:
+            # 不调用父类的keyPressEvent，让事件继续冒泡到应用程序范围
+            event.ignore()
+            return
+        
+        # 其他键盘事件按默认方式处理
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event):
+        """获得焦点时的处理"""
+        # 当获得焦点时，确保项目被选中
+        if not self.is_selected and self.category_tab and hasattr(self.category_tab, "main_window"):
+            main_window = self.category_tab.main_window
+            if main_window:
+                self._update_selection_in_visible_items(main_window)
+        
+        super().focusInEvent(event)
+    
+    def _update_selection_in_visible_items(self, main_window):
+        """更新可见项目中的选中状态"""
+        # 获取所有可见项目
+        visible_items = []
+        for i in range(self.category_tab.content_layout.count()):
+            widget = self.category_tab.content_layout.itemAt(i).widget()
+            if widget and isinstance(widget, LaunchItem) and widget.isVisible():
+                visible_items.append(widget)
+        
+        try:
+            index = visible_items.index(self)
+            # 更新当前选中索引
+            main_window.current_selected_index = index
+            # 清除其他选中
+            for item in visible_items:
+                if item != self:
+                    item.set_selected(False)
+            # 选中当前项目
+            self.set_selected(True)
+        except ValueError:
+            pass  # 项目不在可见列表中
