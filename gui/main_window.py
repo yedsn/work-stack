@@ -19,7 +19,7 @@ from PyQt5.QtGui import (QCursor, QIcon, QColor, QKeySequence, QMovie, QTextChar
 from PyQt5.QtCore import QEvent
 from PyQt5.QtGui import QTextDocument
 from gui.category_tab import CategoryTab
-from utils.config_manager import load_config, save_config
+from utils.config_manager import load_config, save_config, flush_config
 from gui.launch_item import LaunchItem
 from utils.logger import get_logger
 from utils.platform_settings import (get_platform_style, get_platform_setting, 
@@ -31,6 +31,28 @@ from gui.github_settings_dialog import GitHubSettingsDialog
 from gui.sync_settings_dialog import SyncSettingsDialog
 from gui.config_history_dialog import ConfigHistoryDialog
 from utils.config_history import ConfigHistoryManager
+
+# 配置加载器类
+class ConfigLoader(QObject):
+    """异步配置加载器"""
+    config_loaded = pyqtSignal(dict)  # 配置加载完成信号
+    finished = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.logger = get_logger()
+    
+    def load(self):
+        """在后台线程中加载配置"""
+        try:
+            config = load_config()
+            self.config_loaded.emit(config)
+        except Exception as e:
+            self.logger.error(f"异步加载配置失败: {e}")
+            # 发送空配置
+            self.config_loaded.emit({})
+        finally:
+            self.finished.emit()
 
 # 同步操作的Worker类
 class SyncWorker(QObject):
@@ -155,15 +177,17 @@ class LoadingButton(QPushButton):
         # 创建加载动画标签
         self.loading_icons = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
         self.current_icon_index = 0
+        # 优化：使用合并的主定时器管理所有动画
         self.loading_timer = QTimer()
         self.loading_timer.timeout.connect(self.update_loading_icon)
+        self.loading_timer.setInterval(150)  # 增加间隔以减少CPU使用
         
     def start_loading(self):
         """开始加载动画"""
         self.setEnabled(False)
         self.default_text = self.text()
         self.current_icon_index = 0
-        self.loading_timer.start(100)  # 每100毫秒更新一次
+        self.loading_timer.start()  # 使用默认间隔150ms
         self.update_loading_icon()
         self.setStyleSheet("""
             QPushButton {
@@ -216,7 +240,7 @@ class LoadingOverlay(QWidget):
         
         # 创建加载动画点
         self.dots_timer = QTimer(self)
-        self.dots_timer.setInterval(300)  # 300毫秒更新一次
+        self.dots_timer.setInterval(400)  # 增加间隔以减少CPU使用
         self.dots_timer.timeout.connect(self.update_dots)
         self.dot_count = 0
         
@@ -661,7 +685,7 @@ class LaunchGUI(QMainWindow):
         # 设置自动保存定时器
         self.auto_save_timer = QTimer()
         self.auto_save_timer.setSingleShot(True)
-        self.auto_save_timer.setInterval(1000)  # 1秒后自动保存
+        self.auto_save_timer.setInterval(1500)  # 增加延迟以减少频繁保存
         self.auto_save_timer.timeout.connect(self.save_config_from_editor)
         
         # 连接编辑器内容变化信号
@@ -771,7 +795,7 @@ class LaunchGUI(QMainWindow):
         category_name, ok = QInputDialog.getText(self, "新建分类", "请输入分类名称:")
         if ok and category_name:
             self.add_category(category_name)
-            self.update_config()
+            self.update_config_debounced()
     
     def show_tab_context_menu(self, position):
         """显示标签页右键菜单"""
@@ -808,7 +832,7 @@ class LaunchGUI(QMainWindow):
             self.tabs[new_name] = tab
             
             # 更新配置
-            self.update_config()
+            self.update_config_debounced()
     
     def delete_category(self, index, name):
         """删除分类"""
@@ -819,7 +843,7 @@ class LaunchGUI(QMainWindow):
         if confirm == QMessageBox.Yes:
             self.tab_widget.removeTab(index)
             self.tabs.pop(name)
-            self.update_config()
+            self.update_config_debounced()
     
     def move_launch_item(self, item, from_category, to_category):
         """将启动项移动到其他分类"""
@@ -875,7 +899,7 @@ class LaunchGUI(QMainWindow):
             self.params_input.clear()
             
             # 更新配置
-            self.update_config()
+            self.update_config_debounced()
     
     def browse_app(self):
         """浏览选择应用"""
@@ -886,11 +910,13 @@ class LaunchGUI(QMainWindow):
             self.app_input.setText(file_path)
     
     def load_config(self):
-        """加载配置"""
+        """同步加载配置（保留用于初始化）"""
+        config = load_config()
+        self.update_ui_with_config(config)
+        
+    def update_ui_with_config(self, config):
+        """使用配置更新UI"""
         try:
-            # 读取配置
-            config = load_config()
-            
             # 清空现有标签页
             while self.tab_widget.count() > 0:
                 self.tab_widget.removeTab(0)
@@ -911,32 +937,40 @@ class LaunchGUI(QMainWindow):
             if len(categories) <= 1:
                 categories.extend(["娱乐", "工作", "文档"])
             
-            # 创建标签页
-            for category in categories:
-                self.add_category(category)
-            
-            # 添加启动项
-            for program in config.get("programs", []):
-                name = program.get("name", "")
-                category = program.get("category", "娱乐")
+            # 批量创建标签页（减少重绘次数）
+            self.tab_widget.setUpdatesEnabled(False)
+            try:
+                for category in categories:
+                    self.add_category(category)
                 
-                if not name or category not in self.tabs:
-                    continue
-                
-                for launch_item in program.get("launch_items", []):
-                    app = launch_item.get("app", "")
-                    params = launch_item.get("params", [])
+                # 添加启动项
+                for program in config.get("programs", []):
+                    name = program.get("name", "")
+                    category = program.get("category", "娱乐")
                     
-                    if not app:
+                    if not name or category not in self.tabs:
                         continue
                     
-                    self.tabs[category].add_launch_item(name, app, params)
-            
-            # 更新"全部"分类 - 直接从配置加载所有程序
-            self.update_all_category_from_config(config)
+                    for launch_item in program.get("launch_items", []):
+                        app = launch_item.get("app", "")
+                        params = launch_item.get("params", [])
+                        
+                        if not app:
+                            continue
+                        
+                        self.tabs[category].add_launch_item(name, app, params)
+                
+                # 更新"全部"分类 - 直接从配置加载所有程序
+                self.update_all_category_from_config(config)
+                
+            finally:
+                self.tab_widget.setUpdatesEnabled(True)
             
             # 确保所有项目都安装了事件过滤器
             self.install_event_filters_to_all_items()
+        except Exception as e:
+            self.logger.error(f"更新UI失败: {e}")
+            raise
             
             # 更新统计信息
             self.update_statistics()
@@ -1009,8 +1043,8 @@ class LaunchGUI(QMainWindow):
                                 "params": widget.params
                             })
             
-            # 保存配置
-            save_config(config)
+            # 保存配置（使用延迟保存）
+            save_config(config, immediate=False)
             
             # 保存历史记录（仅在非跳过更新的情况下）
             if not skip_all_update:
@@ -1027,6 +1061,18 @@ class LaunchGUI(QMainWindow):
             self.update_statistics()
         except Exception as e:
             self.logger.error(f"更新配置失败: {e}")
+    
+    def update_config_debounced(self, skip_all_update=False):
+        """防抖动的配置更新"""
+        # 取消之前的定时器
+        if hasattr(self, 'config_update_timer') and self.config_update_timer:
+            self.config_update_timer.stop()
+        
+        # 设置新的定时器，500ms 后执行
+        self.config_update_timer = QTimer()
+        self.config_update_timer.setSingleShot(True)
+        self.config_update_timer.timeout.connect(lambda: self.update_config(skip_all_update))
+        self.config_update_timer.start(500)
     
     def handle_tab_click(self, index):
         """处理标签页点击事件"""
@@ -1146,12 +1192,34 @@ class LaunchGUI(QMainWindow):
 
     def _perform_refresh(self):
         """执行实际的刷新操作"""
+        # 异步加载配置，避免阻塞主线程
+        self.load_config_async()
+        
+    def load_config_async(self):
+        """异步加载配置"""
+        # 创建加载线程
+        self.config_loader = QThread()
+        self.config_worker = ConfigLoader()
+        self.config_worker.moveToThread(self.config_loader)
+        
+        # 连接信号
+        self.config_loader.started.connect(self.config_worker.load)
+        self.config_worker.config_loaded.connect(self.on_config_loaded)
+        self.config_worker.finished.connect(self.config_loader.quit)
+        self.config_worker.finished.connect(self.config_worker.deleteLater)
+        self.config_loader.finished.connect(self.config_loader.deleteLater)
+        
+        # 启动线程
+        self.config_loader.start()
+        
+    def on_config_loaded(self, config):
+        """配置加载完成后的处理"""
         try:
             # 清空搜索框
             self.clear_search()
             
-            # 重新加载配置
-            self.load_config()
+            # 在主线程中更新UI
+            self.update_ui_with_config(config)
             
             # 隐藏加载遮罩
             self.loading_overlay.hide()
@@ -1391,6 +1459,11 @@ class LaunchGUI(QMainWindow):
         # 保存设置
         self.save_settings()
         
+        # 清理资源（仅在完全退出时）
+        close_behavior = get_platform_setting('window_close_behavior')
+        if close_behavior != 'hide' and close_behavior != 'minimize_to_tray':
+            self.cleanup_resources()
+        
         # 获取平台关闭窗口行为设置
         close_behavior = get_platform_setting('window_close_behavior')
         
@@ -1409,7 +1482,35 @@ class LaunchGUI(QMainWindow):
                     event.ignore()
                     return
         
+        # 如果不是隐藏到托盘，则清理资源
+        self.cleanup_resources()
         event.accept()
+    
+    def cleanup_resources(self):
+        """清理所有资源"""
+        try:
+            # 刷新未保存的配置
+            flush_config()
+            
+            # 停止所有定时器
+            if hasattr(self, 'main_timer') and self.main_timer:
+                self.main_timer.stop()
+            if hasattr(self, 'config_update_timer') and self.config_update_timer:
+                self.config_update_timer.stop()
+            if hasattr(self, 'auto_sync_timer') and self.auto_sync_timer:
+                self.auto_sync_timer.stop()
+            
+            # 取消正在进行的同步操作
+            if hasattr(self, 'sync_worker') and self.sync_worker:
+                self.sync_worker.cancel()
+            
+            # 清理配置加载器
+            if hasattr(self, 'config_loader') and self.config_loader:
+                self.config_loader.quit()
+                
+            self.logger.info("已清理所有资源")
+        except Exception as e:
+            self.logger.error(f"清理资源失败: {e}")
 
     def set_tray_icon(self, tray_icon):
         """设置系统托盘图标"""
@@ -1706,7 +1807,7 @@ class LaunchGUI(QMainWindow):
         # 例如重新加载该分类的项目等
         
         # 更新配置
-        self.update_config() 
+        self.update_config_debounced() 
 
     def export_config(self):
         """导出配置"""

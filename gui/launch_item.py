@@ -211,7 +211,22 @@ class LaunchItem(QFrame):
         self.category_tab = category_tab
     
     def update_display(self):
-        """更新显示内容"""
+        """更新显示内容（优化版）"""
+        # 检查是否需要更新，避免不必要的重绘
+        current_hash = hash((self.name, self.app, tuple(self.params)))
+        if hasattr(self, '_last_display_hash') and current_hash == self._last_display_hash:
+            return  # 数据未变化，无需更新
+        self._last_display_hash = current_hash
+        
+        # 暂停更新以提高性能
+        self.setUpdatesEnabled(False)
+        try:
+            self._do_update_display()
+        finally:
+            self.setUpdatesEnabled(True)
+    
+    def _do_update_display(self):
+        """执行实际的显示更新"""
         # 更新标题
         if self.layout().count() > 0:
             title_bar = self.layout().itemAt(0).widget()

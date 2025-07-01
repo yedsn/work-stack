@@ -291,8 +291,35 @@ def main():
     if sys.platform == 'darwin':
         app.applicationStateChanged.connect(applicationStateChanged)
 
+    # 设置应用退出时的清理函数
+    def cleanup_on_exit():
+        try:
+            from utils.config_manager import flush_config
+            # 刷新所有未保存的配置
+            flush_config()
+            
+            # 清理主窗口资源
+            if 'window' in locals():
+                window.cleanup_resources()
+            
+            # 清理热键管理器
+            if 'hotkey_manager' in locals() and hotkey_manager:
+                hotkey_manager.cleanup()
+                
+            logger.info("应用退出清理完成")
+        except Exception as e:
+            logger.error(f"应用退出清理失败: {e}")
+    
+    import atexit
+    atexit.register(cleanup_on_exit)
+    
     logger.info("应用程序进入主循环")
-    exit_code = app.exec_()
+    try:
+        exit_code = app.exec_()
+    finally:
+        # 确保清理
+        cleanup_on_exit()
+    
     logger.info(f"应用程序退出，退出代码: {exit_code}")
     return exit_code
 

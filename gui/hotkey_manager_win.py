@@ -34,7 +34,7 @@ class HotkeyManagerWin:
         from PyQt5.QtCore import QTimer
         self.check_timer = QTimer()
         self.check_timer.timeout.connect(self._check_hotkey_pressed)
-        self.check_timer.start(100)  # 每 100 毫秒检查一次
+        self.check_timer.start(200)  # 优化：增加到200ms以减少CPU使用
         
     def register_hotkey(self):
         """注册全局快捷键"""
@@ -124,13 +124,27 @@ class HotkeyManagerWin:
         except Exception as e:
             self.logger.error(f"注销热键时出错: {str(e)}")
     
-    def __del__(self):
-        """析构函数，确保清理所有热键"""
+    def cleanup(self):
+        """清理资源"""
         try:
             self.unregister_hotkey()
             # 停止定时器
-            if hasattr(self, 'check_timer'):
+            if hasattr(self, 'check_timer') and self.check_timer:
                 self.check_timer.stop()
+                self.check_timer.deleteLater()
+                self.check_timer = None
+            
+            # 清理状态
+            self.hotkey_pressed = False
+            
+            self.logger.info("已清理Windows热键管理器资源")
+        except Exception as e:
+            self.logger.error(f"清理热键管理器资源失败: {e}")
+    
+    def __del__(self):
+        """析构函数，确保清理所有热键"""
+        try:
+            self.cleanup()
         except Exception as e:
             # 在析构函数中不应该引发异常
             pass
