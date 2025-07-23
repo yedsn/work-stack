@@ -147,3 +147,104 @@ def get_programs(config: Dict[str, Any]) -> list:
         程序列表
     """
     return config.get("programs", [])
+
+def get_available_tags(config: Dict[str, Any]) -> list:
+    """
+    获取可用标签列表
+    
+    Args:
+        config: 配置数据
+        
+    Returns:
+        可用标签列表
+    """
+    default_tags = ["通用", "PC", "Mac笔记本", "BK100"]
+    return config.get("available_tags", default_tags)
+
+def add_available_tag(config: Dict[str, Any], tag: str) -> Dict[str, Any]:
+    """
+    添加新的可用标签
+    
+    Args:
+        config: 配置数据
+        tag: 要添加的标签
+        
+    Returns:
+        更新后的配置数据
+    """
+    available_tags = get_available_tags(config)
+    if tag not in available_tags:
+        available_tags.append(tag)
+        config["available_tags"] = available_tags
+    return config
+
+def get_tag_filter_state(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    获取标签过滤状态
+    
+    Args:
+        config: 配置数据
+        
+    Returns:
+        标签过滤状态
+    """
+    default_state = {
+        "selected_tags": [],
+        "filter_mode": "OR"  # AND 或 OR
+    }
+    return config.get("tag_filter_state", default_state)
+
+def update_tag_filter_state(config: Dict[str, Any], selected_tags: list, filter_mode: str = "OR") -> Dict[str, Any]:
+    """
+    更新标签过滤状态
+    
+    Args:
+        config: 配置数据
+        selected_tags: 选中的标签列表
+        filter_mode: 过滤模式 ("AND" 或 "OR")
+        
+    Returns:
+        更新后的配置数据
+    """
+    config["tag_filter_state"] = {
+        "selected_tags": selected_tags,
+        "filter_mode": filter_mode
+    }
+    return config
+
+def filter_programs_by_tags(config: Dict[str, Any], programs: list = None) -> list:
+    """
+    根据标签过滤程序列表
+    
+    Args:
+        config: 配置数据
+        programs: 程序列表，如果为None则从config获取
+        
+    Returns:
+        过滤后的程序列表
+    """
+    if programs is None:
+        programs = get_programs(config)
+    
+    filter_state = get_tag_filter_state(config)
+    selected_tags = filter_state.get("selected_tags", [])
+    filter_mode = filter_state.get("filter_mode", "OR")
+    
+    # 如果没有选择标签，返回所有程序
+    if not selected_tags:
+        return programs
+    
+    filtered_programs = []
+    for program in programs:
+        program_tags = program.get("tags", [])
+        
+        if filter_mode == "AND":
+            # AND模式：程序必须包含所有选中的标签
+            if all(tag in program_tags for tag in selected_tags):
+                filtered_programs.append(program)
+        else:
+            # OR模式：程序包含任一选中标签即可
+            if any(tag in program_tags for tag in selected_tags):
+                filtered_programs.append(program)
+    
+    return filtered_programs

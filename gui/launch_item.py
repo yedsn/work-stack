@@ -37,11 +37,12 @@ class ParamLabel(QLabel):
 
 class LaunchItem(QFrame):
     """启动项组件"""
-    def __init__(self, name, app, params=None, source_category=None):
+    def __init__(self, name, app, params=None, source_category=None, tags=None):
         super().__init__()
         self.name = name
         self.app = app
         self.params = params or []
+        self.tags = tags or []  # 添加标签支持
         self.category_tab = None
         self.source_category = source_category  # 添加所属分类属性
         self.is_selected = False  # 添加选中状态
@@ -131,6 +132,47 @@ class LaunchItem(QFrame):
             category_font.setPointSize(get_platform_setting('font_sizes.category_label'))
             category_label.setFont(category_font)
             content_layout.addWidget(category_label)
+        
+        # 标签信息
+        if self.tags:
+            tags_layout = QVBoxLayout()
+            tags_layout.setSpacing(3)
+            tags_layout.setContentsMargins(0, 5, 0, 0)
+            
+            tags_header = QHBoxLayout()
+            tags_label = QLabel("标签:")
+            tags_label.setStyleSheet(get_platform_style('params_label'))  # 复用参数标签样式
+            tags_font = tags_label.font()
+            tags_font.setPointSize(get_platform_setting('font_sizes.params_label'))
+            tags_label.setFont(tags_font)
+            tags_header.addWidget(tags_label)
+            tags_header.addStretch()
+            tags_layout.addLayout(tags_header)
+            
+            # 创建标签显示的流式布局
+            tags_flow_layout = FlowLayout()
+            tags_flow_layout.setSpacing(4)
+            
+            # 添加每个标签
+            for tag in self.tags:
+                tag_label = QLabel(str(tag))
+                tag_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #e3f2fd;
+                        color: #1976d2;
+                        border: 1px solid #bbdefb;
+                        border-radius: 10px;
+                        padding: 2px 8px;
+                        font-size: 10px;
+                        font-weight: bold;
+                        margin: 1px;
+                    }
+                """)
+                tags_flow_layout.addWidget(tag_label)
+            
+            # 将流式布局添加到标签布局
+            tags_layout.addLayout(tags_flow_layout)
+            content_layout.addLayout(tags_layout)
         
         # 参数信息
         if params:

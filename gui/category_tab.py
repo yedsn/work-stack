@@ -7,6 +7,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QScrollArea,
 from PyQt5.QtCore import Qt, QPoint
 from gui.launch_item import LaunchItem
 from PyQt5.QtGui import QFont
+from utils.logger import get_logger
+
+logger = get_logger()
 
 class CategoryTab(QWidget):
     """分类标签页"""
@@ -144,13 +147,71 @@ class CategoryTab(QWidget):
         """重置滚动条到顶部"""
         self.scroll_area.verticalScrollBar().setValue(0)
     
-    def add_launch_item(self, name, app, params):
+    def update_programs_with_filter(self, filtered_programs):
+        """使用过滤后的程序列表更新显示"""
+        try:
+            # 清除现有项目
+            for i in reversed(range(self.content_layout.count())):
+                widget = self.content_layout.itemAt(i).widget()
+                if widget and isinstance(widget, LaunchItem):
+                    widget.setParent(None)
+            
+            # 添加过滤后的程序
+            if self.category_name == "全部":
+                # "全部"分类显示所有过滤后的程序
+                for program in filtered_programs:
+                    name = program.get("name", "")
+                    category = program.get("category", "娱乐")
+                    tags = program.get("tags", [])
+                    
+                    if not name:
+                        continue
+                    
+                    for launch_item in program.get("launch_items", []):
+                        app = launch_item.get("app", "")
+                        params = launch_item.get("params", [])
+                        
+                        if not app:
+                            continue
+                        
+                        # 创建启动项，添加所属分类信息
+                        item = LaunchItem(name, app, params, category, tags)
+                        item.set_category_tab(self)
+                        self.content_layout.addWidget(item)
+            else:
+                # 其他分类只显示属于该分类的程序
+                for program in filtered_programs:
+                    name = program.get("name", "")
+                    category = program.get("category", "娱乐")
+                    tags = program.get("tags", [])
+                    
+                    if not name or category != self.category_name:
+                        continue
+                    
+                    for launch_item in program.get("launch_items", []):
+                        app = launch_item.get("app", "")
+                        params = launch_item.get("params", [])
+                        
+                        if not app:
+                            continue
+                        
+                        item = LaunchItem(name, app, params, tags=tags)
+                        item.set_category_tab(self)
+                        self.content_layout.addWidget(item)
+            
+            # 更新空列表状态
+            self.check_empty_list()
+            
+        except Exception as e:
+            logger.error(f"使用过滤器更新程序列表时出错: {e}")
+
+    def add_launch_item(self, name, app, params, tags=None):
         """添加启动项"""
         # 保存当前滚动位置
         scroll_val = self.scroll_area.verticalScrollBar().value()
         
-        # 创建并添加新项目
-        item = LaunchItem(name, app, params)
+        # 创建并添加新项目  
+        item = LaunchItem(name, app, params, tags=tags)
         item.set_category_tab(self)
         
         # 确保每个项目都能接收焦点和键盘事件
@@ -238,6 +299,7 @@ class CategoryTab(QWidget):
             # 单选情况下的菜单
             run_action = QAction("运行", self)
             edit_action = QAction("编辑", self)
+            edit_tags_action = QAction("编辑标签", self)
             delete_action = QAction("删除", self)
             
             # 添加复制相关的菜单项
@@ -274,6 +336,7 @@ class CategoryTab(QWidget):
             menu.addAction(run_action)
             menu.addSeparator()
             menu.addAction(edit_action)
+            menu.addAction(edit_tags_action)
             menu.addAction(delete_action)
             menu.addSeparator()
             menu.addMenu(copy_menu)  # 添加复制菜单
@@ -286,6 +349,8 @@ class CategoryTab(QWidget):
                 item.launch()
             elif action == edit_action:
                 self.edit_launch_item(item)
+            elif action == edit_tags_action:
+                self.edit_item_tags(item)
             elif action == delete_action:
                 self.delete_launch_item(item)
     
@@ -368,6 +433,64 @@ class CategoryTab(QWidget):
             if self.main_window:
                 self.main_window.update_config()
     
+    def edit_item_tags(self, item):
+        """编辑启动项标签"""
+        try:
+            from gui.item_tags_dialog import ItemTagsDialog
+            from utils.config_manager import load_config, save_config, get_available_tags
+            
+            # 获取当前配置
+            config = load_config()
+            available_tags = get_available_tags(config)
+            current_tags = item.tags.copy() if item.tags else []
+            
+            # 创建标签编辑对话框
+            dialog = ItemTagsDialog(item.name, available_tags, current_tags, self)
+            
+            # 连接标签更新信号
+            def on_tags_updated(updated_tags):
+                # 实时更新项目的标签（预览）
+                item.tags = updated_tags.copy()
+            
+            dialog.tags_updated.connect(on_tags_updated)
+            
+            # 显示对话框
+            if dialog.exec_():
+                # 用户确认，保存标签更改
+                final_tags = dialog.get_selected_tags()
+                updated_available_tags = dialog.get_updated_available_tags()
+                
+                # 更新项目标签
+                item.tags = final_tags
+                
+                # 更新配置中的可用标签
+                config["available_tags"] = updated_available_tags
+                
+                # 找到并更新配置中对应的程序项
+                programs = config.get("programs", [])
+                for program in programs:
+                    if program.get("name") == item.name:
+                        program["tags"] = final_tags
+                        break
+                
+                # 保存配置
+                save_config(config)
+                
+                # 刷新主窗口的标签过滤器
+                if self.main_window:
+                    self.main_window.refresh_tag_filter()
+                    # 如果当前有过滤器激活，重新应用过滤
+                    self.main_window.apply_tag_filter()
+                
+                logger.info(f"更新了启动项 '{item.name}' 的标签: {final_tags}")
+            else:
+                # 用户取消，恢复原标签
+                item.tags = current_tags
+            
+        except Exception as e:
+            logger.error(f"编辑启动项标签时出错: {e}")
+            QMessageBox.critical(self, "错误", f"编辑标签时出错: {e}")
+    
     def move_item_to_category(self, item, category):
         """将启动项移动到其他分类"""
         if self.main_window:
@@ -426,7 +549,7 @@ class CategoryTab(QWidget):
                 # 将项目移动到当前分类
                 if self.main_window:
                     # 创建新的启动项
-                    new_item = self.add_launch_item(source_item.name, source_item.app, source_item.params)
+                    new_item = self.add_launch_item(source_item.name, source_item.app, source_item.params, source_item.tags)
                     
                     # 从原分类中移除
                     source_tab.remove_launch_item(source_item)
@@ -485,7 +608,7 @@ class CategoryTab(QWidget):
         new_name = item.name + " Copy"
         
         # 添加新项目
-        new_item = self.add_launch_item(new_name, item.app, item.params.copy() if item.params else [])
+        new_item = self.add_launch_item(new_name, item.app, item.params.copy() if item.params else [], item.tags.copy() if item.tags else [])
         
         # 更新配置
         if self.main_window:
@@ -613,7 +736,7 @@ class CategoryTab(QWidget):
             new_name = item.name + " Copy"
             
             # 添加新项目
-            self.add_launch_item(new_name, item.app, item.params.copy() if item.params else [])
+            self.add_launch_item(new_name, item.app, item.params.copy() if item.params else [], item.tags.copy() if item.tags else [])
         
         # 更新配置
         if self.main_window:

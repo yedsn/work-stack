@@ -19,7 +19,10 @@ from PyQt5.QtGui import (QCursor, QIcon, QColor, QKeySequence, QMovie, QTextChar
 from PyQt5.QtCore import QEvent
 from PyQt5.QtGui import QTextDocument
 from gui.category_tab import CategoryTab
-from utils.config_manager import load_config, save_config, flush_config
+from utils.config_manager import (load_config, save_config, flush_config, 
+                                  get_available_tags, get_tag_filter_state, 
+                                  update_tag_filter_state, filter_programs_by_tags,
+                                  add_available_tag)
 from gui.launch_item import LaunchItem
 from utils.logger import get_logger
 from utils.platform_settings import (get_platform_style, get_platform_setting, 
@@ -30,6 +33,8 @@ from utils.webdav_manager import WebDAVManager
 from gui.sync_settings_dialog import SyncSettingsDialog
 from gui.config_history_dialog import ConfigHistoryDialog
 from utils.config_history import ConfigHistoryManager
+from gui.tag_filter_compact import TagFilterCompact
+from gui.tag_manager_dialog import TagManagerDialog
 
 # 配置加载器类
 class ConfigLoader(QObject):
@@ -592,6 +597,12 @@ class LaunchGUI(QMainWindow):
 
         # 将搜索布局添加到操作视图
         operation_layout.addLayout(search_layout)
+        
+        # 创建紧凑型标签过滤器
+        self.tag_filter_widget = TagFilterCompact()
+        self.tag_filter_widget.filter_changed.connect(self.on_tag_filter_changed)
+        operation_layout.addWidget(self.tag_filter_widget)
+        
         operation_layout.addWidget(self.tab_widget)
         
         # 创建控制布局
@@ -869,7 +880,7 @@ class LaunchGUI(QMainWindow):
             self.tabs[from_category].remove_launch_item(item)
         
         # 添加到新分类
-        self.tabs[to_category].add_launch_item(item.name, item.app, item.params)
+        self.tabs[to_category].add_launch_item(item.name, item.app, item.params, item.tags)
         
         # 更新配置 - 但不触发全部分类更新
         self.update_config(skip_all_update=True)
@@ -905,7 +916,7 @@ class LaunchGUI(QMainWindow):
         # 获取当前标签页
         current_tab = self.tab_widget.currentWidget()
         if current_tab and isinstance(current_tab, CategoryTab):
-            current_tab.add_launch_item(name, app, params)
+            current_tab.add_launch_item(name, app, params, [])
             
             # 清空输入框
             self.name_input.clear()
@@ -961,6 +972,7 @@ class LaunchGUI(QMainWindow):
                 for program in config.get("programs", []):
                     name = program.get("name", "")
                     category = program.get("category", "娱乐")
+                    tags = program.get("tags", [])
                     
                     if not name or category not in self.tabs:
                         continue
@@ -972,7 +984,7 @@ class LaunchGUI(QMainWindow):
                         if not app:
                             continue
                         
-                        self.tabs[category].add_launch_item(name, app, params)
+                        self.tabs[category].add_launch_item(name, app, params, tags)
                 
                 # 更新"全部"分类 - 直接从配置加载所有程序
                 self.update_all_category_from_config(config)
@@ -982,6 +994,10 @@ class LaunchGUI(QMainWindow):
             
             # 确保所有项目都安装了事件过滤器
             self.install_event_filters_to_all_items()
+            
+            # 初始化标签过滤器
+            self.refresh_tag_filter()
+            
         except Exception as e:
             self.logger.error(f"更新UI失败: {e}")
             raise
@@ -1132,6 +1148,11 @@ class LaunchGUI(QMainWindow):
         sync_settings_action = QAction("同步设置", self)
         sync_settings_action.triggered.connect(self.show_sync_settings)
         menu.addAction(sync_settings_action)
+        
+        # ===== 标签管理 =====
+        tag_management_action = QAction("标签管理", self)
+        tag_management_action.triggered.connect(self.show_tag_manager)
+        menu.addAction(tag_management_action)
         
         menu.addSeparator()
         
@@ -1415,7 +1436,7 @@ class LaunchGUI(QMainWindow):
                         continue
                     
                     # 创建副本，添加所属分类信息
-                    clone = LaunchItem(widget.name, widget.app, widget.params, category)
+                    clone = LaunchItem(widget.name, widget.app, widget.params, category, widget.tags)
                     clone.set_category_tab(all_tab)
                     
                     # 设置右键菜单
@@ -1444,6 +1465,7 @@ class LaunchGUI(QMainWindow):
         for program in config.get("programs", []):
             name = program.get("name", "")
             category = program.get("category", "娱乐")
+            tags = program.get("tags", [])
             
             if not name:
                 continue
@@ -1456,7 +1478,7 @@ class LaunchGUI(QMainWindow):
                     continue
                 
                 # 创建启动项，添加所属分类信息
-                item = LaunchItem(name, app, params, category)
+                item = LaunchItem(name, app, params, category, tags)
                 item.set_category_tab(all_tab)
                 
                 # 设置右键菜单
@@ -2125,6 +2147,97 @@ class LaunchGUI(QMainWindow):
         except Exception as e:
             self.logger.error(f"显示同步设置对话框时出错: {e}")
             QMessageBox.critical(self, "错误", f"显示同步设置对话框时出错: {e}")
+
+    def show_tag_manager(self):
+        """显示标签管理对话框"""
+        try:
+            config = load_config()
+            available_tags = get_available_tags(config)
+            
+            dialog = TagManagerDialog(available_tags, self)
+            dialog.tags_updated.connect(self.on_tags_updated)
+            
+            if dialog.exec_():
+                # 更新配置中的可用标签
+                updated_tags = dialog.get_updated_tags()
+                config["available_tags"] = updated_tags
+                save_config(config)
+                
+                # 更新UI
+                self.refresh_tag_filter()
+                self.logger.info("标签管理更新完成")
+                
+        except Exception as e:
+            self.logger.error(f"显示标签管理对话框时出错: {e}")
+            QMessageBox.critical(self, "错误", f"显示标签管理对话框时出错: {e}")
+    
+    def on_tags_updated(self, updated_tags):
+        """标签更新时的处理"""
+        try:
+            config = load_config()  
+            config["available_tags"] = updated_tags
+            save_config(config)
+            
+            # 更新标签过滤器
+            self.refresh_tag_filter()
+            
+        except Exception as e:
+            self.logger.error(f"更新标签时出错: {e}")
+    
+    def refresh_tag_filter(self):
+        """刷新标签过滤器"""
+        try:
+            config = load_config()
+            available_tags = get_available_tags(config)
+            filter_state = get_tag_filter_state(config)
+            
+            # 更新标签过滤器组件
+            self.tag_filter_widget.set_available_tags(available_tags)
+            self.tag_filter_widget.set_filter_state(
+                filter_state.get("selected_tags", []),
+                filter_state.get("filter_mode", "OR")
+            )
+            
+        except Exception as e:
+            self.logger.error(f"刷新标签过滤器时出错: {e}")
+    
+    def on_tag_filter_changed(self, selected_tags, filter_mode):
+        """标签过滤器改变时的处理"""
+        try:
+            config = load_config()
+            
+            # 更新配置
+            update_tag_filter_state(config, selected_tags, filter_mode)
+            save_config(config)
+            
+            # 刷新显示的程序列表
+            self.apply_tag_filter()
+            
+            self.logger.debug(f"标签过滤器更新: 选中标签={selected_tags}, 模式={filter_mode}")
+            
+        except Exception as e:
+            self.logger.error(f"处理标签过滤器改变时出错: {e}")
+    
+    def apply_tag_filter(self):
+        """应用标签过滤"""
+        try:
+            config = load_config()
+            
+            # 获取过滤后的程序列表
+            filtered_programs = filter_programs_by_tags(config)
+            
+            # 更新所有标签页的显示
+            for category_name, tab in self.tabs.items():
+                if hasattr(tab, 'update_programs_with_filter'):
+                    # 如果标签页支持过滤，使用过滤后的程序列表
+                    tab.update_programs_with_filter(filtered_programs)
+                else:
+                    # 否则使用传统方式更新（为了兼容性）
+                    if hasattr(tab, 'update_programs'):
+                        tab.update_programs(filtered_programs)
+            
+        except Exception as e:
+            self.logger.error(f"应用标签过滤时出错: {e}")
 
     def upload_to_github(self):
         """上传配置到所有启用的同步服务（异步）"""
