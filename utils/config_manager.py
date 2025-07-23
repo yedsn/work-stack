@@ -248,3 +248,174 @@ def filter_programs_by_tags(config: Dict[str, Any], programs: list = None) -> li
                 filtered_programs.append(program)
     
     return filtered_programs
+
+def prepare_config_for_sync(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    准备用于同步的配置数据（排除本地特定的设置）
+    
+    Args:
+        config: 完整的配置数据
+        
+    Returns:
+        用于同步的配置数据（排除了本地特定设置）
+    """
+    # 创建配置副本
+    sync_config = config.copy()
+    
+    # 从配置中读取本地专用键列表，如果没有则使用默认值
+    sync_settings = config.get("sync_settings", {})
+    local_only_keys = sync_settings.get("local_only_keys", [
+        "tag_filter_state",  # 标签过滤状态保持本地
+        "window_size",       # 窗口大小本地化
+        "device_window_sizes",  # 设备特定窗口大小
+        "sync_settings"      # 同步设置本身也不同步
+    ])
+    
+    # 排除本地专用设置
+    for key in local_only_keys:
+        if key in sync_config:
+            del sync_config[key]
+    
+    return sync_config
+
+def merge_synced_config(local_config: Dict[str, Any], synced_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    合并同步的配置与本地配置
+    
+    Args:
+        local_config: 本地配置数据
+        synced_config: 从远程同步的配置数据
+        
+    Returns:
+        合并后的配置数据
+    """
+    # 以同步配置为基础
+    merged_config = synced_config.copy()
+    
+    # 从本地配置中读取本地专用键列表
+    sync_settings = local_config.get("sync_settings", {})
+    local_only_keys = sync_settings.get("local_only_keys", [
+        "tag_filter_state",  # 保持本地的标签过滤状态
+        "window_size",       # 保持本地的窗口大小
+        "device_window_sizes",  # 保持设备特定窗口大小
+        "sync_settings"      # 同步设置本身也保持本地
+    ])
+    
+    # 保留本地特定的设置
+    for key in local_only_keys:
+        if key in local_config:
+            merged_config[key] = local_config[key]
+    
+    return merged_config
+
+def get_local_only_keys(config: Dict[str, Any]) -> list:
+    """
+    获取本地专用键列表
+    
+    Args:
+        config: 配置数据
+        
+    Returns:
+        本地专用键列表
+    """
+    sync_settings = config.get("sync_settings", {})
+    return sync_settings.get("local_only_keys", [
+        "tag_filter_state",
+        "window_size", 
+        "device_window_sizes",
+        "sync_settings"
+    ])
+
+def set_local_only_keys(config: Dict[str, Any], keys: list) -> Dict[str, Any]:
+    """
+    设置本地专用键列表
+    
+    Args:
+        config: 配置数据
+        keys: 本地专用键列表
+        
+    Returns:
+        更新后的配置数据
+    """
+    if "sync_settings" not in config:
+        config["sync_settings"] = {}
+    
+    config["sync_settings"]["local_only_keys"] = keys
+    return config
+
+def add_local_only_key(config: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """
+    添加本地专用键
+    
+    Args:
+        config: 配置数据
+        key: 要添加的键名
+        
+    Returns:
+        更新后的配置数据
+    """
+    local_only_keys = get_local_only_keys(config)
+    if key not in local_only_keys:
+        local_only_keys.append(key)
+        config = set_local_only_keys(config, local_only_keys)
+    return config
+
+def remove_local_only_key(config: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """
+    移除本地专用键
+    
+    Args:
+        config: 配置数据
+        key: 要移除的键名
+        
+    Returns:
+        更新后的配置数据
+    """
+    local_only_keys = get_local_only_keys(config)
+    if key in local_only_keys:
+        local_only_keys.remove(key)
+        config = set_local_only_keys(config, local_only_keys)
+    return config
+
+def print_sync_config_info(config: Dict[str, Any] = None):
+    """
+    打印同步配置信息（调试和管理用途）
+    
+    Args:
+        config: 配置数据，如果为None则自动加载
+    """
+    if config is None:
+        config = load_config()
+    
+    print("🔧 同步配置信息")
+    print("=" * 50)
+    
+    # 显示当前的本地专用键
+    local_only_keys = get_local_only_keys(config)
+    print(f"📋 本地专用键 ({len(local_only_keys)} 个):")
+    for i, key in enumerate(local_only_keys, 1):
+        print(f"   {i}. {key}")
+    
+    print("\n" + "=" * 50)
+    
+    # 显示将要同步的配置项
+    sync_config = prepare_config_for_sync(config)
+    print(f"☁️  将要同步的配置项 ({len(sync_config)} 个):")
+    for i, key in enumerate(sync_config.keys(), 1):
+        print(f"   {i}. {key}")
+    
+    print("\n" + "=" * 50)
+    
+    # 显示本地保留的配置项
+    local_keys = set(config.keys()) - set(sync_config.keys())
+    print(f"🏠 本地保留的配置项 ({len(local_keys)} 个):")
+    for i, key in enumerate(sorted(local_keys), 1):
+        print(f"   {i}. {key}")
+    
+    print("\n✅ 配置信息显示完成！")
+
+# 命令行调用支持
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "sync-info":
+        print_sync_config_info()

@@ -8,7 +8,7 @@ from requests.auth import HTTPBasicAuth
 import base64
 from urllib.parse import urlparse, urljoin
 from utils.logger import get_logger
-from utils.config_manager import load_config, save_config
+from utils.config_manager import load_config, save_config, prepare_config_for_sync, merge_synced_config
 
 class WebDAVManager:
     """WebDAV 管理器，用于将配置同步到 WebDAV 服务"""
@@ -178,7 +178,10 @@ class WebDAVManager:
             
             # 读取本地配置
             config = load_config()
-            config_json = json.dumps(config, ensure_ascii=False, indent=2)
+            
+            # 准备用于同步的配置（排除本地特定设置）
+            sync_config = prepare_config_for_sync(config)
+            config_json = json.dumps(sync_config, ensure_ascii=False, indent=2)
             
             # 上传到WebDAV
             file_url = self.get_file_url()
@@ -218,8 +221,15 @@ class WebDAVManager:
             if response.status_code == 200:
                 # 解析JSON内容
                 try:
-                    config_data = json.loads(response.text)
-                    return True, "配置已成功从 WebDAV 下载", config_data
+                    synced_config = json.loads(response.text)
+                    
+                    # 读取本地配置以保留本地特定设置
+                    local_config = load_config()
+                    
+                    # 合并配置
+                    merged_config = merge_synced_config(local_config, synced_config)
+                    
+                    return True, "配置已成功从 WebDAV 下载", merged_config
                 except json.JSONDecodeError:
                     return False, "下载的配置文件格式无效", None
             elif response.status_code == 404:

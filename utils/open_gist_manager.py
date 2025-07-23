@@ -4,7 +4,7 @@
 import requests
 import json
 from utils.logger import get_logger
-from utils.config_manager import load_config, save_config
+from utils.config_manager import load_config, save_config, prepare_config_for_sync, merge_synced_config
 
 class OpenGistManager:
     """Open Gist 管理器，用于将配置同步到 Open Gist 服务"""
@@ -95,6 +95,9 @@ class OpenGistManager:
             # 读取本地配置
             config = load_config()
             
+            # 准备用于同步的配置（排除本地特定设置）
+            sync_config = prepare_config_for_sync(config)
+            
             # 检查 Gist 是否存在
             response = requests.get(
                 f"{self.base_url}/gists/{self.gist_id}", 
@@ -106,7 +109,7 @@ class OpenGistManager:
             
             # 准备更新数据
             files_data = {}
-            files_data[self.filename] = {"content": json.dumps(config, ensure_ascii=False, indent=2)}
+            files_data[self.filename] = {"content": json.dumps(sync_config, ensure_ascii=False, indent=2)}
             
             # 更新 Gist
             update_data = {"files": files_data}
@@ -152,8 +155,15 @@ class OpenGistManager:
             # 获取文件内容
             file_content = files[self.filename].get("content", "{}")
             try:
-                config_data = json.loads(file_content)
-                return True, "配置已成功从 Open Gist 下载", config_data
+                synced_config = json.loads(file_content)
+                
+                # 读取本地配置以保留本地特定设置
+                local_config = load_config()
+                
+                # 合并配置
+                merged_config = merge_synced_config(local_config, synced_config)
+                
+                return True, "配置已成功从 Open Gist 下载", merged_config
             except json.JSONDecodeError:
                 return False, "配置文件格式无效", None
         except Exception as e:
