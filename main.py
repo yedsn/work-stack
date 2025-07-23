@@ -166,6 +166,9 @@ def main():
                 # 创建热键管理器实例
                 hotkey_manager = HotkeyManagerWin(window, settings)
                 
+                # 设置窗口对热键管理器的引用
+                window.set_hotkey_manager(hotkey_manager)
+                
                 # 注册热键
                 hotkey_manager.register_hotkey()
                 logger.info(f"已注册全局热键: {settings.toggle_hotkey}")

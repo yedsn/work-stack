@@ -36,6 +36,9 @@ class HotkeyManagerWin:
         self.check_timer.timeout.connect(self._check_hotkey_pressed)
         self.check_timer.start(200)  # 优化：增加到200ms以减少CPU使用
         
+        # 暂停/恢复状态
+        self.checking_paused = False
+        
     def register_hotkey(self):
         """注册全局快捷键"""
         try:
@@ -93,6 +96,10 @@ class HotkeyManagerWin:
     
     def _check_hotkey_pressed(self):
         """在主线程中检查热键是否被按下"""
+        # 如果检查被暂停，跳过处理
+        if self.checking_paused:
+            return
+            
         if self.hotkey_pressed:
             self._handle_hotkey_action()
             self.hotkey_pressed = False
@@ -115,6 +122,16 @@ class HotkeyManagerWin:
     
     # 这些方法现在由settings对象提供，不再需要在这里实现
     
+    def pause_checking(self):
+        """暂停热键检测"""
+        self.checking_paused = True
+        self.logger.debug("热键检测已暂停")
+    
+    def resume_checking(self):
+        """恢复热键检测"""
+        self.checking_paused = False
+        self.logger.debug("热键检测已恢复")
+
     def unregister_hotkey(self):
         """注销全局快捷键"""
         try:

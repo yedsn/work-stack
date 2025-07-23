@@ -347,6 +347,21 @@ class LaunchGUI(QMainWindow):
         self.logger = get_logger()
         self.logger.debug("初始化主窗口")
         
+        # 缓存平台检测结果，避免重复判断
+        self._platform_cache = {
+            'activate_method': get_platform_setting('app_activate_method'),
+            'is_windows': is_windows(),
+            'is_mac': is_mac()
+        }
+        
+        # 配置缓存机制
+        self._config_cache = None
+        self._config_cache_time = 0
+        self._config_cache_timeout = 5  # 缓存5秒
+        
+        # 热键管理器引用（由主程序设置）
+        self.hotkey_manager = None
+        
         # 设置窗口标题和大小
         self.setWindowTitle("应用启动器")
 
@@ -1231,9 +1246,11 @@ class LaunchGUI(QMainWindow):
     def toggle_minimize_to_tray(self, checked):
         """切换最小化到托盘的设置"""
         try:
-            config = load_config()
+            config = self.get_cached_config()
             config["minimize_to_tray"] = checked
             save_config(config)
+            # 配置更新后使缓存失效
+            self.invalidate_config_cache()
             self.logger.debug(f"已更新最小化到托盘设置: {checked}")
         except Exception as e:
             self.logger.error(f"更新最小化到托盘设置失败: {e}")
@@ -1475,8 +1492,8 @@ class LaunchGUI(QMainWindow):
         elif close_behavior == 'minimize_to_tray':
             # 托盘行为 - 根据配置决定
             if self.tray_icon and self.tray_icon.isVisible():
-                # 仅当配置中启用了托盘图标功能时才执行
-                config = load_config()
+                # 使用缓存的配置，避免频繁文件I/O
+                config = self.get_cached_config()
                 if config.get("minimize_to_tray", True):
                     self.hide()
                     event.ignore()
@@ -1515,30 +1532,66 @@ class LaunchGUI(QMainWindow):
     def set_tray_icon(self, tray_icon):
         """设置系统托盘图标"""
         self.tray_icon = tray_icon
+    
+    def set_hotkey_manager(self, hotkey_manager):
+        """设置热键管理器引用"""
+        self.hotkey_manager = hotkey_manager
 
     def toggle_visibility(self):
         """切换主窗口显示/隐藏状态"""
         if self.isVisible():
             self.hide()
         else:
+            # 优化窗口状态恢复逻辑
+            # 首先确保窗口不是最小化状态
+            if self.isMinimized():
+                self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+            
             self.show()
             self.raise_()  # 将窗口提升到顶层
             self.activateWindow()  # 确保窗口激活
             
-            # 获取当前平台的激活方法
-            activate_method = get_platform_setting('app_activate_method')
+            # 使用缓存的平台检测结果，避免重复判断
+            activate_method = self._platform_cache['activate_method']
             
             # 根据不同平台的激活方法执行特定操作
-            if activate_method == 'windows_api' and is_windows():
-                # Windows平台特定处理
-                self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
-            elif activate_method == 'appkit' and is_mac():
+            if activate_method == 'windows_api' and self._platform_cache['is_windows']:
+                # Windows平台特定处理：立即设置窗口为活动状态
+                self.setWindowState(self.windowState() | Qt.WindowActive)
+                # 强制将窗口带到前台
+                self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+                self.show()
+                self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+                self.show()
+            elif activate_method == 'appkit' and self._platform_cache['is_mac']:
                 # macOS平台特定处理
                 # 使用AppKit将应用程序带到前台
                 AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
             
-            # 使用QTimer延时设置焦点，确保窗口完全显示后再设置焦点
-            QTimer.singleShot(100, lambda: self.focus_search_input())
+            # 移除重复的焦点设置延迟，让showEvent处理焦点设置
+
+    def get_cached_config(self):
+        """获取缓存的配置，如果缓存过期则重新加载"""
+        import time
+        current_time = time.time()
+        
+        # 检查缓存是否有效
+        if (self._config_cache is None or 
+            current_time - self._config_cache_time > self._config_cache_timeout):
+            
+            # 缓存过期，重新加载
+            from utils.config_manager import load_config
+            self._config_cache = load_config()
+            self._config_cache_time = current_time
+            self.logger.debug("配置缓存已更新")
+        
+        return self._config_cache
+    
+    def invalidate_config_cache(self):
+        """使配置缓存失效"""
+        self._config_cache = None
+        self._config_cache_time = 0
+        self.logger.debug("配置缓存已失效")
 
     def focus_search_input(self):
         """将焦点设置到搜索输入框"""
@@ -2489,20 +2542,40 @@ class LaunchGUI(QMainWindow):
         """重写显示事件，用于在显示窗口时执行操作"""
         super().showEvent(event)
         
-        # 窗口显示时停止自动同步定时器
+        # 暂停热键检测在窗口恢复期间，减少CPU竞争
+        if self.hotkey_manager and hasattr(self.hotkey_manager, 'pause_checking'):
+            self.hotkey_manager.pause_checking()
+            # 300ms后恢复热键检测，给窗口足够时间完成恢复
+            QTimer.singleShot(300, lambda: (
+                self.hotkey_manager.resume_checking() 
+                if self.hotkey_manager and hasattr(self.hotkey_manager, 'resume_checking') 
+                else None
+            ))
+        
+        # 优化自动同步定时器启停：避免重复操作
         if hasattr(self, 'auto_sync_timer') and self.auto_sync_timer.isActive():
             self.logger.debug("窗口显示，停止自动同步定时器")
             self.auto_sync_timer.stop()
         
-        # 确保当窗口显示后，搜索框获得焦点
-        QTimer.singleShot(100, self.focus_search_input)
+        # 优化焦点设置：减少延迟并只在窗口真正可见时设置
+        if self.isVisible() and not self.isMinimized():
+            QTimer.singleShot(50, self.focus_search_input)  # 减少延迟从100ms到50ms
         
     def hideEvent(self, event):
         """重写隐藏事件，用于在窗口隐藏时执行操作"""
         super().hideEvent(event)
         
-        # 窗口隐藏时启动自动同步定时器
+        # 优化自动同步定时器启停：延迟启动，避免快速显示/隐藏时的频繁切换
         if hasattr(self, 'auto_sync_timer') and not self.auto_sync_timer.isActive():
+            # 延迟1秒启动同步定时器，避免快速切换时的性能损失
+            QTimer.singleShot(1000, self._start_auto_sync_timer)
+    
+    def _start_auto_sync_timer(self):
+        """延迟启动自动同步定时器"""
+        # 只有在窗口真正隐藏时才启动定时器
+        if (hasattr(self, 'auto_sync_timer') and 
+            not self.auto_sync_timer.isActive() and 
+            not self.isVisible()):
             self.logger.debug("窗口隐藏，启动自动同步定时器")
             self.auto_sync_timer.start()
 
