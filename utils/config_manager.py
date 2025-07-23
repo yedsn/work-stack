@@ -6,14 +6,16 @@ import json
 import time
 import threading
 from typing import Dict, Any, Optional
+from utils.logger import get_logger
+
+# 获取日志记录器
+logger = get_logger("config_manager")
 
 # 获取项目根目录
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "."))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
 
-# 添加调试信息
-print(f"PROJECT_ROOT: {PROJECT_ROOT}")
-print(f"CONFIG_PATH: {CONFIG_PATH}")
+# 项目路径配置完成
 
 # 全局变量
 _config_cache: Optional[Dict[str, Any]] = None
@@ -52,7 +54,7 @@ def load_config() -> Dict[str, Any]:
             _config_cache['_cache_time'] = time.time()
             return default_config
     except Exception as e:
-        print(f"加载配置失败: {e}")
+        logger.error(f"加载配置失败: {e}")
         default_config = {"categories": ["娱乐", "工作", "文档"], "programs": []}
         _config_cache = default_config.copy()
         _config_cache['_cache_time'] = time.time()
@@ -78,7 +80,7 @@ def _do_save_config(config: Dict[str, Any]) -> bool:
         
         return True
     except Exception as e:
-        print(f"保存配置失败: {e}")
+        logger.error(f"保存配置失败: {e}")
         # 清理临时文件
         temp_path = CONFIG_PATH + '.tmp'
         if os.path.exists(temp_path):
@@ -133,3 +135,15 @@ def clear_config_cache():
     """清空配置缓存"""
     global _config_cache
     _config_cache = None
+
+def get_programs(config: Dict[str, Any]) -> list:
+    """
+    从配置中获取程序列表
+    
+    Args:
+        config: 配置数据
+        
+    Returns:
+        程序列表
+    """
+    return config.get("programs", [])

@@ -27,7 +27,6 @@ from utils.platform_settings import (get_platform_style, get_platform_setting,
 from utils.gist_manager import GistManager
 from utils.open_gist_manager import OpenGistManager
 from utils.webdav_manager import WebDAVManager
-from gui.github_settings_dialog import GitHubSettingsDialog
 from gui.sync_settings_dialog import SyncSettingsDialog
 from gui.config_history_dialog import ConfigHistoryDialog
 from utils.config_history import ConfigHistoryManager

@@ -1,18 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import sys
 from typing import Dict, Any
-
-# 检查当前运行平台
-def get_platform() -> str:
-    """返回当前运行平台的简称"""
-    if sys.platform == 'darwin':
-        return 'mac'
-    elif sys.platform == 'win32':
-        return 'windows'
-    else:
-        return 'linux'
+from utils.os_utils import get_os_type as get_platform
 
 # 各平台样式设置
 PLATFORM_STYLES = {
@@ -618,12 +608,12 @@ def get_platform_setting(setting_path: str = None) -> Any:
 # 单独检查平台是否是Windows/Mac/Linux
 def is_windows() -> bool:
     """检查当前平台是否是Windows"""
-    return sys.platform == 'win32'
+    return get_platform() == 'windows'
 
 def is_mac() -> bool:
     """检查当前平台是否是macOS"""
-    return sys.platform == 'darwin'
+    return get_platform() == 'mac'
 
 def is_linux() -> bool:
     """检查当前平台是否是Linux"""
-    return not (is_windows() or is_mac()) 
+    return get_platform() == 'linux' 

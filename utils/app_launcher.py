@@ -16,6 +16,53 @@ from utils.logger import get_logger
 # 获取日志记录器
 logger = get_logger()
 
+def get_app_path(app_name: str, fallback_paths: Dict[str, str]) -> Optional[str]:
+    """
+    动态检测应用程序路径
+    
+    Args:
+        app_name: 应用程序名称
+        fallback_paths: 各平台的后备路径字典
+        
+    Returns:
+        找到的应用程序路径，如果未找到返回None
+    """
+    os_type = get_os_type()
+    
+    # Windows特殊处理：使用环境变量构建常见路径
+    if os_type == "windows":
+        import winreg
+        user_profile = os.environ.get('USERPROFILE', '')
+        
+        # 常见的安装位置
+        common_paths = [
+            os.path.join(user_profile, f"AppData\\Local\\Programs\\{app_name}\\{app_name}.exe"),
+            os.path.join(user_profile, f"AppData\\Local\\{app_name}\\{app_name}.exe"),
+            f"C:\\Program Files\\{app_name}\\{app_name}.exe",
+            f"C:\\Program Files (x86)\\{app_name}\\{app_name}.exe",
+        ]
+        
+        # 检查这些路径是否存在
+        for path in common_paths:
+            if os.path.exists(path):
+                logger.debug(f"找到 {app_name} 路径: {path}")
+                return path
+    
+    # 使用后备路径
+    fallback_path = fallback_paths.get(os_type)
+    if fallback_path and os.path.exists(fallback_path):
+        return fallback_path
+        
+    # 最后尝试在PATH中查找
+    import shutil
+    path_cmd = shutil.which(app_name.lower())
+    if path_cmd:
+        logger.debug(f"在PATH中找到 {app_name}: {path_cmd}")
+        return path_cmd
+    
+    logger.warning(f"未找到 {app_name} 的路径")
+    return None
+
 def open_browser(browser_name: str, urls: List[str], window_name: Optional[str] = None) -> None:
     """
     打开指定浏览器并访问提供的URL列表
@@ -127,18 +174,16 @@ def open_cursor(project_path: str) -> None:
     Args:
         project_path: 项目路径或完整的Cursor参数
     """
-    os_type = get_os_type()
-    
-    cursor_paths = {
-        "windows": "C:/Users/yedsn/AppData/Local/Programs/Cursor/Cursor.exe",
+    cursor_fallback_paths = {
+        "windows": "",  # 将通过动态检测找到
         "mac": "/Applications/Cursor.app/Contents/MacOS/Cursor",
         "linux": "cursor"  # Linux通常将Cursor添加到PATH
     }
     
-    cursor_cmd = cursor_paths.get(os_type)
+    cursor_cmd = get_app_path("Cursor", cursor_fallback_paths)
     
     if not cursor_cmd:
-        logger.error("未找到Cursor")
+        logger.error("未找到Cursor应用程序")
         return
     
     try:
@@ -194,16 +239,16 @@ def open_obsidian(vault_path: str) -> None:
         logger.error(f"启动Obsidian时出错: {e}")
         
         # 回退到直接启动Obsidian的方式
-        obsidian_paths = {
-            "windows": "C:/Users/yedsn/AppData/Local/Obsidian/Obsidian.exe",
+        obsidian_fallback_paths = {
+            "windows": "",  # 将通过动态检测找到  
             "mac": "/Applications/Obsidian.app/Contents/MacOS/Obsidian",
             "linux": "obsidian"  # Linux通常将Obsidian添加到PATH
         }
         
-        obsidian_cmd = obsidian_paths.get(os_type)
+        obsidian_cmd = get_app_path("Obsidian", obsidian_fallback_paths)
         
         if not obsidian_cmd:
-            logger.error("未找到Obsidian")
+            logger.error("未找到Obsidian应用程序")
             return
         
         try:

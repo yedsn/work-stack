@@ -32,11 +32,41 @@ pip install -r requirements.txt
 
 ## 使用方法
 
-运行 `main.py` 启动应用：
+### 启动应用
 
+#### 统一启动方式（推荐）：
+```bash
+# GUI模式
+./launch.sh
+# 或者
+python launcher.py --gui
+
+# CLI模式
+./launch.sh [参数]
+# 或者
+python launcher.py --cli [参数]
+
+# 通过Python模块运行
+python -m work-stack
 ```
+
+#### 传统启动方式：
+```bash
+# GUI模式
 python main.py
+
+# CLI模式
+python cli.py [参数]
 ```
+
+### 全局热键设置（macOS）
+
+1. 启动应用后，点击右上角的"☰"菜单按钮
+2. 选择"设置">"设置全局热键"
+3. 在弹出的对话框中，按下您想要设置的快捷键组合（例如：Command+Option+L）
+4. 点击"确定"保存设置
+
+> **注意**：首次使用全局热键功能时，macOS 可能会要求授予"辅助功能"权限。请按照系统提示，在"系统偏好设置">"安全性与隐私">"隐私">"辅助功能"中授权本应用。
 
 ## 许可证
 
@@ -100,4 +130,35 @@ else:
 - 搜索和过滤功能
 - 键盘导航支持
 - 系统托盘集成
-- 多平台支持（Windows、macOS、Linux） 
+- 多平台支持（Windows、macOS、Linux）
+
+## 故障排除
+
+### macOS 热键问题
+
+如果全局热键无法正常工作：
+
+1. 确保已安装 PyObjC 库：
+   ```bash
+   pip3 install pyobjc
+   ```
+
+2. 检查"系统偏好设置">"安全性与隐私">"隐私">"辅助功能"中是否已授权本应用
+
+3. 尝试重新设置热键，避免使用系统已占用的快捷键组合
+
+### 应用无法启动
+
+1. 检查Python版本（需要3.6+）
+2. 安装依赖项：`pip install -r requirements.txt`
+3. 在终端中运行以查看详细错误信息：
+   ```bash
+   python main.py
+   ```
+
+### 权限问题（macOS/Linux）
+
+确保启动脚本有执行权限：
+```bash
+chmod +x launch.sh
+``` 

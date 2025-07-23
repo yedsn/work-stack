@@ -8,20 +8,15 @@ from typing import List, Dict, Any
 
 from utils.ui_utils import print_colored, display_menu_multi
 from utils.app_launcher import launch_program
-from utils.config_loader import load_config, get_programs
+from utils.config_manager import load_config, get_programs
 
 def main():
     # 检查参数数量
     if len(sys.argv) == 1:
         # 没有参数时，加载默认配置并显示程序列表
-        config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-        if not os.path.exists(config_file):
-            print_colored(f"错误: 默认配置文件 '{config_file}' 不存在", "red")
-            sys.exit(1)
-            
         try:
-            # 加载配置
-            config = load_config(config_file)
+            # 加载配置（config_manager会自动处理路径）
+            config = load_config()
             programs = get_programs(config)
             
             if not programs:
@@ -35,7 +30,7 @@ def main():
                 sys.exit(0)
             
             # 获取配置文件所在目录
-            config_dir = os.path.dirname(os.path.abspath(config_file))
+            config_dir = os.path.dirname(os.path.abspath("config.json"))
             
             # 启动所有选中的程序
             for choice in choices:

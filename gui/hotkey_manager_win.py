@@ -13,19 +13,18 @@ import traceback
 import logging
 import keyboard
 from tkinter import messagebox
+from typing import Callable, Optional
 from utils.logger import get_logger
-# keyboard 库已经内置了按键映射，不需要额外定义
+from gui.hotkey_manager_base import BaseHotkeyManager
 
-class HotkeyManagerWin:
+class HotkeyManagerWin(BaseHotkeyManager):
     """Windows平台的全局热键管理器"""
     
     def __init__(self, window, settings):
         """初始化热键管理器"""
-        self.logger = get_logger()
+        super().__init__(window, settings)
         self.logger.debug("初始化Windows热键管理器")
         
-        self.window = window  # 主窗口引用
-        self.settings = settings  # 设置引用
         self.hotkey_registered = False  # 记录热键是否成功注册
         self.hotkey_retry_count = 0  # 热键重试次数
         self.hotkey_pressed = False  # 热键是否被按下
@@ -39,9 +38,15 @@ class HotkeyManagerWin:
         # 暂停/恢复状态
         self.checking_paused = False
         
-    def register_hotkey(self):
+    def register_hotkey(self, hotkey_str: str = None, callback: Callable = None) -> bool:
         """注册全局快捷键"""
         try:
+            # 使用传入的参数或从settings获取默认值
+            if hotkey_str is None:
+                hotkey_str = getattr(self.settings, 'toggle_hotkey', 'ctrl+shift+z')
+            if callback is None:
+                callback = self.toggle_window
+                
             # 先清除已有的快捷键绑定
             keyboard.unhook_all()
             self.logger.info("已清除之前的热键绑定")
@@ -58,20 +63,23 @@ class HotkeyManagerWin:
 
             # 注册新的快捷键
             keyboard.add_hotkey(
-                self.settings.toggle_hotkey,
+                hotkey_str,
                 hotkey_callback,
                 suppress=True,
                 trigger_on_release=True
             )
             self.hotkey_registered = True
             self.hotkey_retry_count = 0
-            self.logger.info(f"全局热键注册成功: {self.settings.toggle_hotkey}")
+            self.registered_hotkeys[hotkey_str] = callback
+            self.logger.info(f"全局热键注册成功: {hotkey_str}")
+            return True
             
         except Exception as e:
             error_msg = f"注册热键失败: {str(e)}"
             self.logger.error(error_msg)
             self.logger.error(f"错误追踪:\n{traceback.format_exc()}")
             self.retry_register_hotkey()
+            return False
     
     def retry_register_hotkey(self):
         """重试注册快捷键"""
@@ -132,14 +140,32 @@ class HotkeyManagerWin:
         self.checking_paused = False
         self.logger.debug("热键检测已恢复")
 
-    def unregister_hotkey(self):
+    def unregister_hotkey(self, hotkey_str: Optional[str] = None) -> bool:
         """注销全局快捷键"""
         try:
-            keyboard.unhook_all()
-            self.hotkey_registered = False
-            self.logger.info("全局热键已注销")
+            if hotkey_str:
+                # 注销特定热键
+                if hotkey_str in self.registered_hotkeys:
+                    del self.registered_hotkeys[hotkey_str]
+                    # keyboard库没有提供单独注销特定热键的接口，需要清除所有后重新注册
+                    keyboard.unhook_all()
+                    self.hotkey_registered = False
+                    # 如果还有其他热键，重新注册它们
+                    for remaining_hotkey, callback in self.registered_hotkeys.items():
+                        self.register_hotkey(remaining_hotkey, callback)
+                    self.logger.info(f"热键 {hotkey_str} 已注销")
+                else:
+                    self.logger.warning(f"热键 {hotkey_str} 未注册，无法注销")
+            else:
+                # 注销所有热键
+                keyboard.unhook_all()
+                self.hotkey_registered = False
+                self.registered_hotkeys.clear()
+                self.logger.info("所有全局热键已注销")
+            return True
         except Exception as e:
             self.logger.error(f"注销热键时出错: {str(e)}")
+            return False
     
     def cleanup(self):
         """清理资源"""

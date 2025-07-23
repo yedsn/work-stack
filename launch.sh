@@ -35,25 +35,19 @@ export PYTHONPATH="$DIR:$PYTHONPATH"
 
 # 定义启动函数
 launch_app() {
-    # 直接将所有参数传递给Python脚本
+    # 使用统一的launcher.py入口点
     if [ "$PLATFORM" = "Darwin" ]; then
-        # 在 macOS 上，使用 open 命令运行 GUI 应用，以获得更好的集成
+        # 在 macOS 上，对于GUI模式使用后台运行
         if [ -z "$*" ]; then
             # 如果没有参数，启动 GUI
-            $PYTHON_CMD "$DIR/main.py" &
+            $PYTHON_CMD "$DIR/launcher.py" --gui &
         else
             # 如果有参数，启动 CLI
-            $PYTHON_CMD "$DIR/cli.py" "$@"
+            $PYTHON_CMD "$DIR/launcher.py" --cli "$@"
         fi
     else
-        # 在其他平台上，直接运行 Python 脚本
-        if [ -z "$*" ]; then
-            # 如果没有参数，启动 GUI
-            $PYTHON_CMD "$DIR/main.py"
-        else
-            # 如果有参数，启动 CLI
-            $PYTHON_CMD "$DIR/cli.py" "$@"
-        fi
+        # 在其他平台上，直接运行
+        $PYTHON_CMD "$DIR/launcher.py" "$@"
     fi
 }
 
