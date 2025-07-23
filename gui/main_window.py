@@ -986,8 +986,8 @@ class LaunchGUI(QMainWindow):
                         
                         self.tabs[category].add_launch_item(name, app, params, tags)
                 
-                # 更新"全部"分类 - 直接从配置加载所有程序
-                self.update_all_category_from_config(config)
+                # 更新"全部"分类 - 先加载所有程序（不过滤）
+                self.update_all_category_from_config(config, apply_filter=False)
                 
             finally:
                 self.tab_widget.setUpdatesEnabled(True)
@@ -997,6 +997,9 @@ class LaunchGUI(QMainWindow):
             
             # 初始化标签过滤器
             self.refresh_tag_filter()
+            
+            # 应用保存的标签过滤状态
+            self.apply_tag_filter()
             
         except Exception as e:
             self.logger.error(f"更新UI失败: {e}")
@@ -1447,8 +1450,13 @@ class LaunchGUI(QMainWindow):
                     
                     all_tab.content_layout.addWidget(clone)
 
-    def update_all_category_from_config(self, config):
-        """从配置直接加载全部分类的内容"""
+    def update_all_category_from_config(self, config, apply_filter=True):
+        """从配置直接加载全部分类的内容
+        
+        Args:
+            config: 配置数据
+            apply_filter: 是否应用标签过滤
+        """
         if "全部" not in self.tabs:
             return
         
@@ -1461,8 +1469,13 @@ class LaunchGUI(QMainWindow):
                 all_tab.content_layout.removeWidget(widget)
                 widget.setParent(None)
         
-        # 直接从配置加载所有程序
-        for program in config.get("programs", []):
+        # 获取要显示的程序列表（可能经过过滤）
+        programs_to_show = config.get("programs", [])
+        if apply_filter:
+            programs_to_show = filter_programs_by_tags(config)
+        
+        # 加载程序
+        for program in programs_to_show:
             name = program.get("name", "")
             category = program.get("category", "娱乐")
             tags = program.get("tags", [])
@@ -2226,8 +2239,15 @@ class LaunchGUI(QMainWindow):
             # 获取过滤后的程序列表
             filtered_programs = filter_programs_by_tags(config)
             
-            # 更新所有标签页的显示
+            # 特殊处理"全部"分类
+            if "全部" in self.tabs:
+                self.update_all_category_from_config(config, apply_filter=True)
+            
+            # 更新其他标签页的显示
             for category_name, tab in self.tabs.items():
+                if category_name == "全部":
+                    continue  # 已经在上面处理了
+                    
                 if hasattr(tab, 'update_programs_with_filter'):
                     # 如果标签页支持过滤，使用过滤后的程序列表
                     tab.update_programs_with_filter(filtered_programs)
