@@ -215,13 +215,25 @@ def open_obsidian(vault_path: str) -> None:
     Args:
         vault_path: Obsidian保险库路径或保险库名称
     """
+    import re
+    
     os_type = get_os_type()
+    
+    # 输入验证 - 防止恶意输入
+    if not vault_path or len(vault_path.strip()) == 0:
+        logger.error("保险库路径为空")
+        return
     
     # 从路径中提取保险库名称
     if os.path.isdir(vault_path):
         vault_name = os.path.basename(vault_path)
     else:
         vault_name = vault_path
+    
+    # 验证保险库名称 - 只允许字母、数字、中文、下划线、连字符和空格
+    if not re.match(r'^[\w\u4e00-\u9fff\s\-]+$', vault_name):
+        logger.error(f"无效的保险库名称: {vault_name}")
+        return
     
     # 构建Obsidian URI
     obsidian_uri = f"obsidian://open?vault={vault_name}"
@@ -230,7 +242,8 @@ def open_obsidian(vault_path: str) -> None:
     
     try:
         if os_type == "windows":
-            subprocess.Popen(["start", obsidian_uri], shell=True)
+            # Use cmd.exe with /c to avoid shell injection
+            subprocess.Popen(["cmd.exe", "/c", "start", obsidian_uri])
         elif os_type == "mac":
             subprocess.Popen(["open", obsidian_uri])
         else:  # Linux

@@ -3,5 +3,6 @@ __pycache__
 /build
 /dist
 /logs
-config.json
 /config_history
+config.json
+credentials.enc

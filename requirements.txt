@@ -6,6 +6,7 @@ certifi==2025.1.31
 cffi==1.17.1
 charset-normalizer==3.4.1
 colorama==0.4.6
+cryptography>=3.4.0
 customtkinter==5.2.2
 darkdetect==0.8.0
 et-xmlfile==1.1.0
@@ -36,8 +37,8 @@ pystray==0.19.5
 pytweening==1.2.0
 pywin32>=300; platform_system == "Windows"
 pywin32-ctypes==0.2.3; sys_platform == 'win32'
-pyobjc==10.1; sys_platform == 'darwin'  # macOS 全局热键支持
-python-xlib==0.33; sys_platform == 'linux'  # Linux 全局热键支持
+pyobjc==10.1; sys_platform == 'darwin'
+python-xlib==0.33; sys_platform == 'linux'
 requests>=2.25.0
 selenium==4.31.0
 setuptools==75.8.0

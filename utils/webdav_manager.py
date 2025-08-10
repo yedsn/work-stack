@@ -9,19 +9,36 @@ import base64
 from urllib.parse import urlparse, urljoin
 from utils.logger import get_logger
 from utils.config_manager import load_config, save_config, prepare_config_for_sync, merge_synced_config
+from utils.credential_manager import CredentialManager
 
 class WebDAVManager:
     """WebDAV 管理器，用于将配置同步到 WebDAV 服务"""
     
     def __init__(self):
         self.logger = get_logger()
+        self.credential_manager = CredentialManager()
+        
         # 从配置中读取 WebDAV 相关设置
         config = load_config()
         self.webdav_config = config.get("webdav_sync", {})
         self.enabled = self.webdav_config.get("enabled", False)
         self.server_url = self.webdav_config.get("server_url", "")
         self.username = self.webdav_config.get("username", "")
-        self.password = self.webdav_config.get("password", "")
+        
+        # 从安全存储获取密码，如果不存在则尝试从配置迁移
+        stored_username, stored_password = self.credential_manager.get_credential("webdav")
+        if stored_password:
+            self.password = stored_password
+        else:
+            # 迁移旧的明文密码到安全存储
+            old_password = self.webdav_config.get("password", "")
+            if old_password:
+                self.credential_manager.store_credential("webdav", self.username, old_password)
+                self.password = old_password
+                self.logger.info("已将WebDAV密码迁移到安全存储")
+            else:
+                self.password = ""
+        
         self.remote_path = self.webdav_config.get("remote_path", "/")
         self.filename = self.webdav_config.get("filename", "launcher_config.json")
         self.auto_sync = self.webdav_config.get("auto_sync", False)
@@ -39,6 +56,10 @@ class WebDAVManager:
         self.username = username
         self.password = password
         
+        # 安全存储密码
+        if password:
+            self.credential_manager.store_credential("webdav", username, password)
+        
         # 确保远程路径以/开头且以/结尾
         if remote_path and not remote_path.startswith('/'):
             remote_path = '/' + remote_path
@@ -49,13 +70,13 @@ class WebDAVManager:
         self.filename = filename
         self.auto_sync = auto_sync
         
-        # 更新配置文件
+        # 更新配置文件 - 不再保存密码明文
         config = load_config()
         config["webdav_sync"] = {
             "enabled": enabled,
             "server_url": server_url,
             "username": username,
-            "password": password,
+            # 密码已安全存储，配置文件中不再包含
             "remote_path": remote_path,
             "filename": filename,
             "auto_sync": auto_sync

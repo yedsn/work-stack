@@ -9,6 +9,7 @@ import shutil
 from datetime import datetime
 from utils.logger import get_logger
 from utils.config_manager import load_config, save_config, CONFIG_PATH
+from utils.config_cleanup import ConfigHistoryCleanup
 
 # 获取项目根目录
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "."))
@@ -20,6 +21,7 @@ class ConfigHistoryManager:
     def __init__(self):
         self.logger = get_logger()
         self.history_dir = HISTORY_DIR
+        self.cleanup_manager = ConfigHistoryCleanup(self.history_dir)
         
         # 确保历史目录存在
         if not os.path.exists(self.history_dir):
@@ -161,29 +163,18 @@ class ConfigHistoryManager:
             self.logger.error(f"恢复配置失败: {e}")
             return False, f"恢复配置失败: {str(e)}"
     
-    def cleanup_old_histories(self, max_files=100):
-        """清理旧的历史记录，保留最新的max_files个文件"""
+    def cleanup_old_histories(self, max_files=20):
+        """清理旧的历史记录，使用ConfigHistoryCleanup进行高效清理"""
         try:
-            # 获取所有历史记录文件
-            all_histories = self.get_history_list(limit=9999)
+            # 使用专用清理管理器
+            deleted_count = self.cleanup_manager.cleanup_old_files(
+                keep_count=max_files, 
+                max_age_days=30
+            )
             
-            # 如果历史记录数量超过上限，删除最旧的记录
-            if len(all_histories) > max_files:
-                # 按时间排序，最新的在前面
-                all_histories.sort(key=lambda x: x["timestamp"], reverse=True)
-                
-                # 获取需要删除的记录
-                files_to_delete = all_histories[max_files:]
-                
-                # 删除旧记录
-                for file_info in files_to_delete:
-                    try:
-                        os.remove(file_info["path"])
-                        self.logger.info(f"删除旧历史记录: {file_info['filename']}")
-                    except Exception as e:
-                        self.logger.error(f"删除旧历史记录失败 {file_info['filename']}: {e}")
+            if deleted_count > 0:
+                self.logger.info(f"自动清理完成，删除了 {deleted_count} 个历史记录文件")
             
-            return True
         except Exception as e:
             self.logger.error(f"清理旧历史记录失败: {e}")
             return False 

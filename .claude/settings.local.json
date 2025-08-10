@@ -9,7 +9,8 @@
       "Bash(python:*)",
       "Bash(grep:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(pip install:*)"
     ],
     "deny": []
   }
