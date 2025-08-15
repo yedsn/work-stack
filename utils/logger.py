@@ -44,7 +44,7 @@ def get_logger(name="launcher"):
         
         # 创建日志记录器
         logger = logging.getLogger(name)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG)  # 改为DEBUG级别以便查看性能日志
         
         # 防止重复添加处理器
         if not logger.handlers:

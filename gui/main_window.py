@@ -68,10 +68,17 @@ class SyncWorker(QObject):
         super().__init__()
         self.operation_type = operation_type  # "upload" 或 "download"
         self.logger = get_logger()
+        self.should_stop = False  # 中断标志
     
     def run(self):
         """执行同步操作"""
         try:
+            # 检查是否应该停止
+            if self.should_stop:
+                self.logger.debug("同步操作被中断")
+                self.finished.emit(False, "操作已中断", None)
+                return
+                
             # 获取所有启用的同步服务
             enabled_services = []
             
@@ -99,6 +106,11 @@ class SyncWorker(QObject):
             if self.operation_type == "upload":
                 results = []
                 for service_name, manager in enabled_services:
+                    # 检查是否应该停止
+                    if self.should_stop:
+                        self.logger.debug(f"上传{service_name}时被中断")
+                        break
+                        
                     success, message = manager.upload_config()
                     results.append((service_name, success, message))
                     self.progress.emit(service_name, success)
@@ -120,6 +132,11 @@ class SyncWorker(QObject):
                 downloaded_configs = []
                 
                 for service_name, manager in enabled_services:
+                    # 检查是否应该停止
+                    if self.should_stop:
+                        self.logger.debug(f"下载{service_name}时被中断")
+                        break
+                        
                     success, message, config_data = manager.download_config()
                     results.append((service_name, success, message))
                     self.progress.emit(service_name, success)
@@ -365,6 +382,14 @@ class LaunchGUI(QMainWindow):
         
         # 热键管理器引用（由主程序设置）
         self.hotkey_manager = None
+        
+        # 同步状态管理
+        self._sync_in_progress = False
+        self._sync_threads = []  # 跟踪活跃的同步线程
+        
+        # 配置版本管理（用于增量更新）
+        self._config_hash = None
+        self._last_update_time = 0
         
         # 设置窗口标题和大小
         self.setWindowTitle("应用启动器")
@@ -942,6 +967,23 @@ class LaunchGUI(QMainWindow):
     def update_ui_with_config(self, config):
         """使用配置更新UI"""
         try:
+            import time
+            import hashlib
+            import json
+            
+            start_time = time.time()
+            
+            # 计算配置的哈希值，用于检测变化
+            config_str = json.dumps(config, sort_keys=True, ensure_ascii=False)
+            current_hash = hashlib.md5(config_str.encode()).hexdigest()
+            
+            # 如果配置没有变化，跳过更新
+            if self._config_hash == current_hash and time.time() - self._last_update_time < 1:
+                self.logger.debug("配置未变化，跳过UI更新")
+                return
+            
+            self.logger.debug(f"开始更新UI，配置哈希: {current_hash[:8]}")
+            
             # 清空现有标签页
             while self.tab_widget.count() > 0:
                 self.tab_widget.removeTab(0)
@@ -965,10 +1007,15 @@ class LaunchGUI(QMainWindow):
             # 批量创建标签页（减少重绘次数）
             self.tab_widget.setUpdatesEnabled(False)
             try:
+                category_start = time.time()
                 for category in categories:
                     self.add_category(category)
+                category_end = time.time()
+                self.logger.debug(f"创建 {len(categories)} 个分类耗时: {(category_end - category_start)*1000:.2f}ms")
                 
                 # 添加启动项
+                item_start = time.time()
+                item_count = 0
                 for program in config.get("programs", []):
                     name = program.get("name", "")
                     category = program.get("category", "娱乐")
@@ -985,30 +1032,49 @@ class LaunchGUI(QMainWindow):
                             continue
                         
                         self.tabs[category].add_launch_item(name, app, params, tags)
+                        item_count += 1
+                
+                item_end = time.time()
+                self.logger.debug(f"添加 {item_count} 个启动项耗时: {(item_end - item_start)*1000:.2f}ms")
                 
                 # 更新"全部"分类 - 先加载所有程序（不过滤）
+                all_start = time.time()
                 self.update_all_category_from_config(config, apply_filter=False)
+                all_end = time.time()
+                self.logger.debug(f"更新全部分类耗时: {(all_end - all_start)*1000:.2f}ms")
                 
             finally:
                 self.tab_widget.setUpdatesEnabled(True)
             
             # 确保所有项目都安装了事件过滤器
+            filter_start = time.time()
             self.install_event_filters_to_all_items()
+            filter_end = time.time()
+            self.logger.debug(f"安装事件过滤器耗时: {(filter_end - filter_start)*1000:.2f}ms")
             
             # 初始化标签过滤器
+            tag_start = time.time()
             self.refresh_tag_filter()
             
             # 应用保存的标签过滤状态
             self.apply_tag_filter()
+            tag_end = time.time()
+            self.logger.debug(f"刷新标签过滤器耗时: {(tag_end - tag_start)*1000:.2f}ms")
+            
+            # 更新配置哈希和时间戳
+            self._config_hash = current_hash
+            self._last_update_time = time.time()
+            
+            # 更新统计信息
+            self.update_statistics()
+            
+            # 记录总耗时
+            end_time = time.time()
+            self.logger.info(f"UI更新完成，总耗时: {(end_time - start_time)*1000:.2f}ms")
             
         except Exception as e:
             self.logger.error(f"更新UI失败: {e}")
             raise
-            
-            # 更新统计信息
-            self.update_statistics()
-        except Exception as e:
-            self.logger.error(f"加载配置失败: {e}")
     
     def install_event_filters_to_all_items(self):
         """为所有启动项安装事件过滤器"""
@@ -1217,19 +1283,27 @@ class LaunchGUI(QMainWindow):
     def refresh_from_config(self):
         """刷新并从配置文件重新加载数据"""
         try:
+            import time
+            start_time = time.time()
+            self.logger.debug("开始刷新配置")
+            
             # 显示加载遮罩
             self.loading_overlay.raise_()
             self.loading_overlay.show()
             
             # 使用QTimer延迟执行，让UI有时间刷新显示遮罩
-            QTimer.singleShot(100, self._perform_refresh)
+            QTimer.singleShot(100, lambda: self._perform_refresh(start_time))
         except Exception as e:
             self.logger.error(f"启动刷新失败: {e}")
             self.loading_overlay.hide()
             QMessageBox.critical(self, "刷新失败", f"启动刷新时出错: {e}")
 
-    def _perform_refresh(self):
+    def _perform_refresh(self, start_time=None):
         """执行实际的刷新操作"""
+        if start_time:
+            import time
+            self.logger.debug(f"遮罩显示耗时: {(time.time() - start_time)*1000:.2f}ms")
+        
         # 异步加载配置，避免阻塞主线程
         self.load_config_async()
         
@@ -1253,6 +1327,9 @@ class LaunchGUI(QMainWindow):
     def on_config_loaded(self, config):
         """配置加载完成后的处理"""
         try:
+            import time
+            start_time = time.time()
+            
             # 清空搜索框
             self.clear_search()
             
@@ -1261,6 +1338,11 @@ class LaunchGUI(QMainWindow):
             
             # 隐藏加载遮罩
             self.loading_overlay.hide()
+            
+            # 记录总刷新耗时
+            end_time = time.time()
+            self.logger.info(f"配置刷新完成，总耗时: {(end_time - start_time)*1000:.2f}ms")
+            
         except Exception as e:
             self.logger.error(f"刷新配置失败: {e}")
             self.loading_overlay.hide()
@@ -1576,6 +1658,13 @@ class LaunchGUI(QMainWindow):
         if self.isVisible():
             self.hide()
         else:
+            import time
+            start_time = time.time()
+            self.logger.debug("开始恢复窗口显示")
+            
+            # 中断正在进行的同步操作
+            self._interrupt_sync_operations()
+            
             # 优化窗口状态恢复逻辑
             # 首先确保窗口不是最小化状态
             if self.isMinimized():
@@ -1602,6 +1691,10 @@ class LaunchGUI(QMainWindow):
                 # 使用AppKit将应用程序带到前台
                 AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
             
+            # 记录窗口恢复耗时
+            end_time = time.time()
+            self.logger.info(f"窗口恢复耗时: {(end_time - start_time)*1000:.2f}ms")
+            
             # 移除重复的焦点设置延迟，让showEvent处理焦点设置
 
     def get_cached_config(self):
@@ -1626,6 +1719,69 @@ class LaunchGUI(QMainWindow):
         self._config_cache = None
         self._config_cache_time = 0
         self.logger.debug("配置缓存已失效")
+    
+    def _interrupt_sync_operations(self):
+        """中断正在进行的同步操作"""
+        try:
+            # 停止自动同步定时器
+            if hasattr(self, 'auto_sync_timer') and self.auto_sync_timer.isActive():
+                self.auto_sync_timer.stop()
+                self.logger.debug("已停止自动同步定时器")
+            
+            # 中断正在进行的同步线程
+            interrupted_count = 0
+            for thread_info in self._sync_threads.copy():
+                thread, worker = thread_info
+                if thread and thread.isRunning():
+                    # 设置中断标志
+                    if hasattr(worker, 'should_stop'):
+                        worker.should_stop = True
+                    # 等待线程结束（最多等100ms）
+                    if not thread.wait(100):
+                        # 如果线程不响应，强制终止
+                        thread.terminate()
+                        thread.wait(100)
+                    interrupted_count += 1
+                    self._sync_threads.remove(thread_info)
+            
+            if interrupted_count > 0:
+                self.logger.info(f"已中断 {interrupted_count} 个同步操作")
+                self._sync_in_progress = False
+                
+        except Exception as e:
+            self.logger.error(f"中断同步操作时出错: {e}")
+    
+    def _stop_sync_operations_immediately(self):
+        """立即停止同步操作（在窗口显示时调用）"""
+        try:
+            # 停止自动同步定时器
+            if hasattr(self, 'auto_sync_timer') and self.auto_sync_timer.isActive():
+                self.auto_sync_timer.stop()
+                self.logger.debug("窗口显示，立即停止自动同步定时器")
+            
+            # 检查是否有正在进行的同步操作
+            active_sync_count = len([t for t in self._sync_threads if t[0].isRunning()])
+            if active_sync_count > 0:
+                self.logger.warning(f"检测到 {active_sync_count} 个活跃同步操作，将在后台继续执行")
+                
+        except Exception as e:
+            self.logger.error(f"停止同步操作时出错: {e}")
+    
+    def _cleanup_finished_threads(self):
+        """清理已完成的线程"""
+        try:
+            finished_threads = []
+            for thread_info in self._sync_threads.copy():
+                thread, worker = thread_info
+                if not thread.isRunning():
+                    finished_threads.append(thread_info)
+                    self._sync_threads.remove(thread_info)
+            
+            if finished_threads:
+                self.logger.debug(f"已清理 {len(finished_threads)} 个已完成的同步线程")
+                
+        except Exception as e:
+            self.logger.error(f"清理已完成线程时出错: {e}")
 
     def focus_search_input(self):
         """将焦点设置到搜索输入框"""
@@ -2342,8 +2498,14 @@ class LaunchGUI(QMainWindow):
             if self.isVisible():
                 self.logger.debug("窗口可见，跳过自动同步")
                 return
+            
+            # 如果已有同步操作在进行，跳过
+            if self._sync_in_progress:
+                self.logger.debug("同步操作正在进行，跳过本次自动同步")
+                return
                 
             self.logger.debug("执行定时自动同步检查")
+            self._sync_in_progress = True
             # 获取所有启用的自动同步服务
             enabled_auto_sync_services = []
             
@@ -2365,6 +2527,7 @@ class LaunchGUI(QMainWindow):
             # 如果没有启用的自动同步服务，返回
             if not enabled_auto_sync_services:
                 self.logger.debug("没有启用的自动同步服务，跳过自动下载")
+                self._sync_in_progress = False
                 return
             
             # 创建线程和Worker进行下载
@@ -2379,16 +2542,24 @@ class LaunchGUI(QMainWindow):
             self.auto_download_worker.finished.connect(self.auto_download_worker.deleteLater)
             self.auto_download_thread.finished.connect(self.auto_download_thread.deleteLater)
             
+            # 记录线程信息
+            self._sync_threads.append((self.auto_download_thread, self.auto_download_worker))
+            
             # 启动线程
             self.auto_download_thread.start()
             self.logger.debug("已启动自动下载配置")
             
         except Exception as e:
             self.logger.error(f"自动同步配置时出错: {e}")
+            self._sync_in_progress = False
 
     def auto_sync_completed(self, success, message, config_data):
         """自动同步完成后的处理"""
         try:
+            # 清理线程记录
+            self._cleanup_finished_threads()
+            self._sync_in_progress = False
+            
             if success and config_data:
                 # 保存配置
                 from utils.config_manager import save_config
@@ -2397,15 +2568,20 @@ class LaunchGUI(QMainWindow):
                 # 保存历史记录
                 self.history_manager.save_history(config_data, "自动同步配置")
                 
-                # 重新加载配置
-                self.load_config()
-                # 更新统计信息
-                self.update_statistics()
-                self.logger.info("已自动从同步服务同步配置")
+                # 只有在窗口隐藏时才重新加载配置，避免影响用户操作
+                if not self.isVisible():
+                    # 重新加载配置
+                    self.load_config()
+                    # 更新统计信息
+                    self.update_statistics()
+                    self.logger.info("已自动从同步服务同步配置")
+                else:
+                    self.logger.info("自动同步完成，但窗口已显示，跳过配置更新")
             else:
                 self.logger.warning(f"自动同步配置失败: {message}")
         except Exception as e:
             self.logger.error(f"处理自动同步结果时出错: {e}")
+            self._sync_in_progress = False
 
     def toggle_view(self):
         """切换视图"""
@@ -2674,6 +2850,9 @@ class LaunchGUI(QMainWindow):
         """重写显示事件，用于在显示窗口时执行操作"""
         super().showEvent(event)
         
+        import time
+        start_time = time.time()
+        
         # 暂停热键检测在窗口恢复期间，减少CPU竞争
         if self.hotkey_manager and hasattr(self.hotkey_manager, 'pause_checking'):
             self.hotkey_manager.pause_checking()
@@ -2684,14 +2863,16 @@ class LaunchGUI(QMainWindow):
                 else None
             ))
         
-        # 优化自动同步定时器启停：避免重复操作
-        if hasattr(self, 'auto_sync_timer') and self.auto_sync_timer.isActive():
-            self.logger.debug("窗口显示，停止自动同步定时器")
-            self.auto_sync_timer.stop()
+        # 立即停止自动同步定时器和相关操作
+        self._stop_sync_operations_immediately()
         
         # 优化焦点设置：减少延迟并只在窗口真正可见时设置
         if self.isVisible() and not self.isMinimized():
-            QTimer.singleShot(50, self.focus_search_input)  # 减少延迟从100ms到50ms
+            QTimer.singleShot(30, self.focus_search_input)  # 进一步减少延迟到30ms
+        
+        # 记录showEvent耗时
+        end_time = time.time()
+        self.logger.debug(f"showEvent耗时: {(end_time - start_time)*1000:.2f}ms")
         
     def hideEvent(self, event):
         """重写隐藏事件，用于在窗口隐藏时执行操作"""
@@ -2699,8 +2880,9 @@ class LaunchGUI(QMainWindow):
         
         # 优化自动同步定时器启停：延迟启动，避免快速显示/隐藏时的频繁切换
         if hasattr(self, 'auto_sync_timer') and not self.auto_sync_timer.isActive():
-            # 延迟1秒启动同步定时器，避免快速切换时的性能损失
-            QTimer.singleShot(1000, self._start_auto_sync_timer)
+            # 延迟2秒启动同步定时器，避免快速切换时的性能损失
+            QTimer.singleShot(2000, self._start_auto_sync_timer)
+            self.logger.debug("窗口隐藏，将在2秒后启动自动同步定时器")
     
     def _start_auto_sync_timer(self):
         """延迟启动自动同步定时器"""
