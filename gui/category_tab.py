@@ -207,6 +207,7 @@ class CategoryTab(QWidget):
                         self.content_layout.addWidget(item)
 
             self.check_empty_list()
+            self._sort_launch_items()
         except Exception as e:
             logger.error(f"使用过滤器更新程序列表时出错: {e}")
 
@@ -222,6 +223,7 @@ class CategoryTab(QWidget):
         self.content_layout.insertWidget(0, item)
         self.reset_scroll_position()
         self.check_empty_list()
+        self._sort_launch_items()
         import sys
         if sys.platform == 'darwin' and self.main_window:
             self.main_window.adjustSize()
@@ -809,6 +811,22 @@ class CategoryTab(QWidget):
                 widget.setParent(None)
                 widget.deleteLater()
         self.check_empty_list()
+
+    def _sort_launch_items(self):
+        """按名称排序并重新排列界面上的启动项。"""
+        items = []
+        for i in range(self.content_layout.count()):
+            widget = self.content_layout.itemAt(i).widget()
+            if widget and isinstance(widget, LaunchItem):
+                items.append(widget)
+        if not items:
+            return
+        items.sort(key=lambda it: (it.name or "").lower())
+        for widget in items:
+            self.content_layout.removeWidget(widget)
+        for widget in items:
+            self.content_layout.addWidget(widget)
+        self.reset_scroll_position()
 
     def resizeEvent(self, event):
         """重写调整大小事件，确保内容宽度正确"""
