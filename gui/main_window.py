@@ -6,24 +6,20 @@ import os
 import sys
 import math
 import time
-import subprocess
 import psutil
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                             QTabWidget, QFileDialog, QInputDialog, QMenu,
                             QAction, QMessageBox, QDialog, QListWidget, QListWidgetItem,
-                            QSystemTrayIcon, QApplication, QCheckBox, QPlainTextEdit,
-                            QStackedWidget)
+                            QSystemTrayIcon, QApplication, QCheckBox)
 from PyQt5.QtCore import Qt, QPoint, QTimer, QThread, pyqtSignal, QObject, QRegExp
-from PyQt5.QtGui import (QCursor, QIcon, QColor, QKeySequence, QMovie, QTextCharFormat, 
-                       QFont, QSyntaxHighlighter, QTextCursor)
+from PyQt5.QtGui import (QCursor, QIcon, QColor, QKeySequence, QMovie, QFont)
 from PyQt5.QtCore import QEvent
-from PyQt5.QtGui import QTextDocument
 from gui.category_tab import CategoryTab
 from utils.config_manager import (load_config, save_config, flush_config, 
                                   get_available_tags, get_tag_filter_state, 
                                   update_tag_filter_state, filter_programs_by_tags,
-                                  add_available_tag, CONFIG_PATH)
+                                  add_available_tag)
 from gui.launch_item import LaunchItem
 from utils.logger import get_logger
 from utils.platform_settings import (get_platform_style, get_platform_setting, 
@@ -46,6 +42,7 @@ class ConfigLoader(QObject):
     def __init__(self):
         super().__init__()
         self.logger = get_logger()
+        self._is_reloading_ui = False
     
     def load(self):
         """在后台线程中加载配置"""
@@ -304,63 +301,10 @@ if is_windows():
     import win32process
 elif is_mac():
     # macOS 平台特定导入
-    import subprocess
     import AppKit
 else:
     # Linux 平台特定导入
     pass
-
-# JSON语法高亮器
-class JsonSyntaxHighlighter(QSyntaxHighlighter):
-    """简单的JSON语法高亮"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        
-        self.highlighting_rules = []
-        
-        # 字符串格式 - 绿色
-        string_format = QTextCharFormat()
-        string_format.setForeground(QColor("#008000"))
-        string_pattern = QRegExp("\".*\"")
-        string_pattern.setMinimal(True)  # 非贪婪模式
-        self.highlighting_rules.append((string_pattern, string_format))
-        
-        # 数字格式 - 蓝色
-        number_format = QTextCharFormat()
-        number_format.setForeground(QColor("#0000FF"))
-        number_pattern = QRegExp("\\b\\d+\\.?\\d*\\b")
-        self.highlighting_rules.append((number_pattern, number_format))
-        
-        # 键名格式 - 红色
-        key_format = QTextCharFormat()
-        key_format.setForeground(QColor("#A52A2A"))
-        key_pattern = QRegExp("\"[^\"]*\"(?=\\s*:)")
-        self.highlighting_rules.append((key_pattern, key_format))
-        
-        # 布尔值和null - 紫色
-        keyword_format = QTextCharFormat()
-        keyword_format.setForeground(QColor("#800080"))
-        keyword_format.setFontWeight(QFont.Bold)
-        keyword_pattern = QRegExp("\\b(true|false|null)\\b")
-        self.highlighting_rules.append((keyword_pattern, keyword_format))
-        
-        # 括号 - 深灰色
-        bracket_format = QTextCharFormat()
-        bracket_format.setForeground(QColor("#303030"))
-        bracket_format.setFontWeight(QFont.Bold)
-        bracket_pattern = QRegExp("[\\[\\]{}]")
-        self.highlighting_rules.append((bracket_pattern, bracket_format))
-        
-    def highlightBlock(self, text):
-        """实现高亮方法"""
-        for pattern, format in self.highlighting_rules:
-            expression = QRegExp(pattern)
-            index = expression.indexIn(text)
-            while index >= 0:
-                length = expression.matchedLength()
-                self.setFormat(index, length, format)
-                index = expression.indexIn(text, index + length)
 
 class LaunchGUI(QMainWindow):
     """应用启动器GUI"""
@@ -453,22 +397,11 @@ class LaunchGUI(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
-        # 创建堆叠小部件，用于切换操作视图和配置文件视图
-        self.stacked_widget = QStackedWidget()
-        
         # 创建操作视图小部件
         self.operation_widget = QWidget()
         operation_layout = QVBoxLayout(self.operation_widget)
         operation_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 创建配置文件视图小部件
-        self.config_widget = QWidget()
-        config_layout = QVBoxLayout(self.config_widget)
-        config_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 将两个视图添加到堆叠小部件
-        self.stacked_widget.addWidget(self.operation_widget)
-        self.stacked_widget.addWidget(self.config_widget)
+        main_layout.addWidget(self.operation_widget)
         
         # 创建标签页控件
         self.tab_widget = QTabWidget()
@@ -664,114 +597,17 @@ class LaunchGUI(QMainWindow):
         # 将控制布局添加到操作视图
         operation_layout.addLayout(control_layout)
         
-        # 配置文件编辑器设置
-        config_editor_label = QLabel("配置文件编辑器 (自动保存):")
-        config_layout.addWidget(config_editor_label)
-        
-        # 添加搜索框布局
-        config_search_layout = QHBoxLayout()
-        config_search_layout.setContentsMargins(0, 5, 0, 5)
-        
-        self.config_search_input = QLineEdit()
-        self.config_search_input.setPlaceholderText("搜索配置...")
-        self.config_search_input.returnPressed.connect(self.search_in_config)
-        
-        # 样式定义
-        search_button_style = """
-            QPushButton {
-                font-size: 16px;
-                font-weight: bold;
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                background-color: #e0e0e0;
-                padding: 4px;
-            }
-            QPushButton:hover {
-                background-color: #d0d0d0;
-                border-color: #4a86e8;
-            }
-            QPushButton:pressed {
-                background-color: #c0c0c0;
-            }
-        """
-        
-        search_prev_button = QPushButton("↑")
-        search_prev_button.setFixedSize(36, 36)
-        search_prev_button.setToolTip("查找上一个 (Shift+F3)")
-        search_prev_button.setStyleSheet(search_button_style)
-        search_prev_button.clicked.connect(lambda: self.search_in_config(direction="prev"))
-        
-        search_next_button = QPushButton("↓")
-        search_next_button.setFixedSize(36, 36)
-        search_next_button.setToolTip("查找下一个 (F3)")
-        search_next_button.setStyleSheet(search_button_style)
-        search_next_button.clicked.connect(lambda: self.search_in_config(direction="next"))
-        
-        config_search_layout.addWidget(QLabel("搜索:"))
-        config_search_layout.addWidget(self.config_search_input)
-        config_search_layout.addWidget(search_prev_button)
-        config_search_layout.addWidget(search_next_button)
-        
-        # 添加搜索布局到配置视图
-        config_layout.addLayout(config_search_layout)
-        
-        # 创建配置文件编辑器
-        self.config_editor = QPlainTextEdit()
-        self.config_editor.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.config_editor.setTabStopWidth(40)  # 设置制表符宽度
-        # 设置固定白色背景
-        self.config_editor.setStyleSheet("""
-            QPlainTextEdit {
-                background-color: #efefef;
-                color: black;
-                font-family: Consolas, Menlo, Monaco, 'Courier New', monospace;
-                font-size: 20px;
-                border: 1px solid #cccccc;
-            }
-        """)
-        # 应用JSON语法高亮
-        self.json_highlighter = JsonSyntaxHighlighter(self.config_editor.document())
-        config_layout.addWidget(self.config_editor)
-        
-        # 设置自动保存定时器
-        self.auto_save_timer = QTimer()
-        self.auto_save_timer.setSingleShot(True)
-        self.auto_save_timer.setInterval(1500)  # 增加延迟以减少频繁保存
-        self.auto_save_timer.timeout.connect(self.save_config_from_editor)
-        
-        # 连接编辑器内容变化信号
-        self.config_editor.textChanged.connect(self.on_config_text_changed)
-        
-        # 创建状态标签
-        self.config_status_label = QLabel("就绪")
-        config_layout.addWidget(self.config_status_label)
-        
-        # 创建切换视图按钮布局
-        view_switch_layout = QHBoxLayout()
-        
-        # 创建切换视图按钮
-        self.switch_view_button = QPushButton("切换到配置文件视图")
-        self.switch_view_button.clicked.connect(self.toggle_view)
-        view_switch_layout.addWidget(self.switch_view_button)
-        
-        # 添加弹性空间，确保统计信息显示在右侧
-        view_switch_layout.addStretch()
-        
-        # 添加统计信息标签
+        # 创建底部统计信息布局
+        stats_layout = QHBoxLayout()
+        stats_layout.addStretch()
         self.stats_label = QLabel()
         self.stats_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.stats_label.setStyleSheet("color: #666666; font-size: 18px;")
-        view_switch_layout.addWidget(self.stats_label)
-        
-        # 将切换视图按钮添加到主布局
-        main_layout.addWidget(self.stacked_widget)
-        main_layout.addLayout(view_switch_layout)
+        stats_layout.addWidget(self.stats_label)
+        main_layout.addLayout(stats_layout)
         
         # 加载配置
         self.load_config()
-        
-        # 初始化加载配置文件到编辑器
-        self.load_config_to_editor()
         
         # 更新统计信息
         self.update_statistics()
@@ -793,25 +629,6 @@ class LaunchGUI(QMainWindow):
         refresh_shortcut.setShortcut(QKeySequence("F5"))
         refresh_shortcut.triggered.connect(self.refresh_from_config)
         self.addAction(refresh_shortcut)
-        
-        # 添加配置编辑器快捷键
-        # 查找下一个 - F3
-        find_next_shortcut = QAction("查找下一个", self)
-        find_next_shortcut.setShortcut(QKeySequence("F3"))
-        find_next_shortcut.triggered.connect(lambda: self.search_in_config(direction="next"))
-        self.addAction(find_next_shortcut)
-        
-        # 查找上一个 - Shift+F3
-        find_prev_shortcut = QAction("查找上一个", self)
-        find_prev_shortcut.setShortcut(QKeySequence("Shift+F3"))
-        find_prev_shortcut.triggered.connect(lambda: self.search_in_config(direction="prev"))
-        self.addAction(find_prev_shortcut)
-        
-        # 查找 - Ctrl+F 
-        find_shortcut = QAction("查找", self)
-        find_shortcut.setShortcut(QKeySequence("Ctrl+F"))
-        find_shortcut.triggered.connect(self.focus_config_search)
-        self.addAction(find_shortcut)
         
         # 安装事件过滤器
         app = QApplication.instance()
@@ -939,6 +756,10 @@ class LaunchGUI(QMainWindow):
         else:
             params = []
         
+        # 如果正在重新加载UI，忽略此次请求
+        if self._is_reloading_ui:
+            return
+        
         # 获取当前标签页
         current_tab = self.tab_widget.currentWidget()
         target_tab = current_tab if isinstance(current_tab, CategoryTab) else None
@@ -991,6 +812,7 @@ class LaunchGUI(QMainWindow):
     def update_ui_with_config(self, config):
         """使用配置更新UI"""
         try:
+            self._is_reloading_ui = True
             import time
             import hashlib
             import json
@@ -1004,6 +826,7 @@ class LaunchGUI(QMainWindow):
             # 如果配置没有变化，跳过更新
             if self._config_hash == current_hash and time.time() - self._last_update_time < 1:
                 self.logger.debug("配置未变化，跳过UI更新")
+                self._is_reloading_ui = False
                 return
             
             self.logger.debug(f"开始更新UI，配置哈希: {current_hash[:8]}")
@@ -1184,6 +1007,8 @@ class LaunchGUI(QMainWindow):
             self.update_statistics()
         except Exception as e:
             self.logger.error(f"更新配置失败: {e}")
+        finally:
+            self._is_reloading_ui = False
     
     def update_config_debounced(self, skip_all_update=False):
         """防抖动的配置更新"""
@@ -1215,13 +1040,8 @@ class LaunchGUI(QMainWindow):
         refresh_action.triggered.connect(self.refresh_from_config)
         config_menu.addAction(refresh_action)
         
-        # 编辑配置文件
-        edit_config_action = QAction("编辑配置文件", self)
-        edit_config_action.triggered.connect(lambda: self.toggle_view() if self.stacked_widget.currentIndex() == 0 else None)
-        config_menu.addAction(edit_config_action)
-        
         # 使用系统默认编辑器打开配置文件
-        external_edit_action = QAction("用系统编辑器打开配置", self)
+        external_edit_action = QAction("打开配置文件", self)
         external_edit_action.triggered.connect(self.open_config_in_system_editor)
         config_menu.addAction(external_edit_action)
         
@@ -1308,25 +1128,6 @@ class LaunchGUI(QMainWindow):
             menu.exec_(button.mapToGlobal(QPoint(0, button.height())))
         else:
             menu.exec_(QCursor.pos())
-
-    def open_config_in_system_editor(self):
-        """Use the system default text editor to open config.json."""
-        try:
-            if not os.path.exists(CONFIG_PATH):
-                QMessageBox.warning(self, "未找到配置", f"配置文件不存在:\n{CONFIG_PATH}")
-                return
-
-            if is_windows():
-                os.startfile(CONFIG_PATH)
-            elif is_mac():
-                subprocess.Popen(["open", CONFIG_PATH])
-            elif is_linux():
-                subprocess.Popen(["xdg-open", CONFIG_PATH])
-            else:
-                raise RuntimeError("当前平台不支持自动打开配置文件")
-        except Exception as e:
-            self.logger.error(f"调用系统编辑器打开配置失败: {e}")
-            QMessageBox.critical(self, "打开失败", f"无法用系统编辑器打开配置文件:\n{e}")
 
     def refresh_from_config(self):
         """刷新并从配置文件重新加载数据"""
@@ -2154,6 +1955,28 @@ class LaunchGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "导入失败", f"导入配置时出错: {e}")
 
+    def open_config_in_system_editor(self):
+        """使用系统默认编辑器打开配置文件"""
+        try:
+            from utils.config_manager import CONFIG_PATH
+            if not os.path.exists(CONFIG_PATH):
+                QMessageBox.warning(self, "未找到配置", f"配置文件不存在:\n{CONFIG_PATH}")
+                return
+
+            if is_windows():
+                os.startfile(CONFIG_PATH)
+            elif is_mac():
+                import subprocess
+                subprocess.Popen(["open", CONFIG_PATH])
+            elif is_linux():
+                import subprocess
+                subprocess.Popen(["xdg-open", CONFIG_PATH])
+            else:
+                raise RuntimeError("当前平台不支持自动打开配置文件")
+        except Exception as e:
+            self.logger.error(f"调用系统编辑器打开配置失败: {e}")
+            QMessageBox.critical(self, "打开失败", f"无法用系统编辑器打开配置文件:\n{e}")
+
     def clear_search(self):
         """清空搜索框并重置过滤"""
         self.search_input.clear()
@@ -2643,120 +2466,7 @@ class LaunchGUI(QMainWindow):
             self.logger.error(f"处理自动同步结果时出错: {e}")
             self._sync_in_progress = False
 
-    def toggle_view(self):
-        """切换视图"""
-        current_index = self.stacked_widget.currentIndex()
-        
-        # 显示加载遮罩
-        self.loading_overlay.raise_()
-        self.loading_overlay.show()
-        
-        # 使用QTimer延迟执行，让UI有时间刷新显示遮罩
-        QTimer.singleShot(100, lambda: self._perform_view_toggle(current_index))
-    
-    def _perform_view_toggle(self, current_index):
-        """执行实际的视图切换操作"""
-        try:
-            if current_index == 0:
-                # 当前是操作视图，切换到配置文件视图
-                # 先更新配置文件内容
-                self.load_config_to_editor()
-                self.stacked_widget.setCurrentIndex(1)
-                self.switch_view_button.setText("返回启动界面")
-            else:
-                # 当前是配置文件视图，切换到操作视图
-                # 确保配置已保存且格式正确
-                try:
-                    # 如果定时器正在运行，说明有未保存的更改
-                    if self.auto_save_timer.isActive():
-                        self.auto_save_timer.stop()
-                        # 立即执行保存
-                        if not self.save_config_from_editor():
-                            # 保存失败，隐藏遮罩并返回
-                            self.loading_overlay.hide()
-                            return
-                        
-                    # 进行额外的配置格式验证
-                    config_text = self.config_editor.toPlainText()
-                    json.loads(config_text)  # 尝试解析，验证格式
-                    
-                    # 切换到操作视图
-                    self.stacked_widget.setCurrentIndex(0)
-                    self.switch_view_button.setText("编辑配置文件")
-                    # 刷新操作视图
-                    self.refresh_from_config()
-                except json.JSONDecodeError as e:
-                    # JSON格式错误，不切换视图
-                    line_no = e.lineno
-                    col_no = e.colno
-                    error_msg = f"JSON格式错误: 第 {line_no} 行, 第 {col_no} 列\n{e.msg}"
-                    QMessageBox.critical(self, "格式错误", error_msg)
-                    # 将光标放在出错位置
-                    cursor = self.config_editor.textCursor()
-                    cursor.setPosition(0)
-                    for _ in range(line_no - 1):
-                        cursor.movePosition(cursor.Down)
-                    for _ in range(col_no - 1):
-                        cursor.movePosition(cursor.Right)
-                    self.config_editor.setTextCursor(cursor)
-                    self.config_editor.setFocus()
-                except Exception as e:
-                    QMessageBox.critical(self, "切换失败", f"切换视图失败: {str(e)}\n请检查配置格式。")
-        finally:
-            # 不管成功还是失败，最后都要隐藏遮罩
-            # 延迟一小段时间，让视图有时间刷新和渲染
-            QTimer.singleShot(300, self.loading_overlay.hide)
 
-    def load_config_to_editor(self):
-        """加载配置到编辑器"""
-        try:
-            config = load_config()
-            self.config_editor.setPlainText(json.dumps(config, ensure_ascii=False, indent=4))
-        except Exception as e:
-            self.logger.error(f"加载配置到编辑器失败: {e}")
-            QMessageBox.critical(self, "加载失败", f"加载配置到编辑器失败: {e}")
-
-    def save_config_from_editor(self):
-        """从编辑器保存配置"""
-        try:
-            config_text = self.config_editor.toPlainText()
-            config = json.loads(config_text)
-            save_config(config)
-            # 更新状态标签
-            self.config_status_label.setText("已保存")
-            self.config_status_label.setStyleSheet("color: green;")
-            
-            # 保存历史记录
-            self.history_manager.save_history(config, "编辑器更新配置")
-            
-            # 更新统计信息
-            self.update_statistics()
-            
-            # 添加自动上传功能
-            self.auto_upload_config()
-            
-            return True
-        except json.JSONDecodeError as e:
-            line_no = e.lineno
-            col_no = e.colno
-            error_msg = f"JSON格式错误: 第 {line_no} 行, 第 {col_no} 列\n{e.msg}"
-            self.config_status_label.setText("保存失败 - JSON格式错误")
-            self.config_status_label.setStyleSheet("color: red;")
-            # 将光标放在出错位置
-            cursor = self.config_editor.textCursor()
-            cursor.setPosition(0)
-            for _ in range(line_no - 1):
-                cursor.movePosition(cursor.Down)
-            for _ in range(col_no - 1):
-                cursor.movePosition(cursor.Right)
-            self.config_editor.setTextCursor(cursor)
-            self.config_editor.setFocus()
-            return False
-        except Exception as e:
-            self.logger.error(f"保存配置失败: {e}")
-            self.config_status_label.setText(f"保存失败 - {str(e)}")
-            self.config_status_label.setStyleSheet("color: red;")
-            return False
 
     def auto_upload_config(self):
         """配置修改后自动上传配置"""
@@ -2810,90 +2520,11 @@ class LaunchGUI(QMainWindow):
         try:
             if success:
                 self.logger.info("自动上传配置成功")
-                # 更新状态标签但不打扰用户
-                self.config_status_label.setText("已保存并上传")
-                self.config_status_label.setStyleSheet("color: green;")
             else:
                 self.logger.warning(f"自动上传配置失败: {message}")
         except Exception as e:
             self.logger.error(f"处理自动上传结果时出错: {e}")
 
-    def on_config_text_changed(self):
-        """处理配置文本变化"""
-        # 显示正在编辑状态
-        self.config_status_label.setText("编辑中...")
-        self.config_status_label.setStyleSheet("color: orange;")
-        # 重置定时器，1秒后自动保存
-        self.auto_save_timer.start()
-
-    def search_in_config(self, direction="next"):
-        """搜索配置文件内容"""
-        # 获取搜索文本
-        search_text = self.config_search_input.text()
-        if not search_text:
-            return
-            
-        # 获取当前光标位置和整个文本
-        cursor = self.config_editor.textCursor()
-        document = self.config_editor.document()
-        
-        # 创建查找选项
-        find_flags = QTextDocument.FindFlags()
-        
-        # 如果是向上搜索，添加向上搜索标志
-        if direction == "prev":
-            find_flags |= QTextDocument.FindBackward
-            
-        # 从当前位置开始搜索
-        if cursor.hasSelection():
-            # 如果有选择，则从选择的开始或结束位置开始搜索
-            if direction == "prev":
-                # 向上搜索，从选择的开始位置搜索
-                cursor.setPosition(cursor.selectionStart())
-            else:
-                # 向下搜索，从选择的结束位置搜索
-                cursor.setPosition(cursor.selectionEnd())
-                
-        # 执行搜索
-        result_cursor = document.find(search_text, cursor, find_flags)
-        
-        # 如果没有找到结果，从文档开始或结束处再次搜索
-        if result_cursor.isNull():
-            # 创建一个新光标
-            new_cursor = QTextCursor(document)
-            
-            if direction == "prev":
-                # 从文档末尾开始向上搜索
-                new_cursor.movePosition(QTextCursor.End)
-            else:
-                # 从文档开始处向下搜索
-                new_cursor.movePosition(QTextCursor.Start)
-                
-            # 再次查找
-            result_cursor = document.find(search_text, new_cursor, find_flags)
-            
-            # 如果还是没找到，显示提示
-            if result_cursor.isNull():
-                self.config_status_label.setText(f"未找到: {search_text}")
-                self.config_status_label.setStyleSheet("color: red;")
-                return
-                
-        # 设置编辑器光标为搜索结果并选择文本
-        self.config_editor.setTextCursor(result_cursor)
-        
-        # 确保光标可见
-        self.config_editor.ensureCursorVisible()
-        
-        # 更新状态标签
-        self.config_status_label.setText(f"已找到: {search_text}")
-        self.config_status_label.setStyleSheet("color: green;")
-
-    def focus_config_search(self):
-        """将焦点设置到配置搜索框"""
-        # 只有当前是配置视图时才设置焦点
-        if self.stacked_widget.currentIndex() == 1:
-            self.config_search_input.setFocus()
-            self.config_search_input.selectAll()  # 全选当前文本，方便用户直接输入
 
     def upload_completed(self, success, message, _):
         """上传完成后的处理"""
