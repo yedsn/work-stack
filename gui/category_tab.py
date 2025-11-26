@@ -150,6 +150,15 @@ class CategoryTab(QWidget):
     def update_programs_with_filter(self, filtered_programs):
         """使用过滤后的程序列表更新显示"""
         try:
+            # 预先收集所有应用以便批量加载图标
+            app_set = set()
+            for program in filtered_programs:
+                for launch_item in program.get("launch_items", []):
+                    app = launch_item.get("app")
+                    if app:
+                        app_set.add(app)
+            LaunchItem.preload_icons(app_set)
+
             # 清除现有项目
             for i in reversed(range(self.content_layout.count())):
                 widget = self.content_layout.itemAt(i).widget()
