@@ -863,6 +863,11 @@ class LaunchGUI(QMainWindow):
                 # 添加启动项
                 item_start = time.time()
                 item_count = 0
+                batch_tabs = []
+                for tab in self.tabs.values():
+                    if hasattr(tab, 'begin_batch_update'):
+                        tab.begin_batch_update()
+                        batch_tabs.append(tab)
                 for program in config.get("programs", []):
                     name = program.get("name", "")
                     category = program.get("category", "娱乐")
@@ -878,8 +883,11 @@ class LaunchGUI(QMainWindow):
                         if not app:
                             continue
                         
-                        self.tabs[category].add_launch_item(name, app, params, tags)
+                        self.tabs[category].add_launch_item(name, app, params, tags, defer_refresh=True)
                         item_count += 1
+                
+                for tab in batch_tabs:
+                    tab.end_batch_update(reset_to_first=True)
                 
                 item_end = time.time()
                 self.logger.debug(f"添加 {item_count} 个启动项耗时: {(item_end - item_start)*1000:.2f}ms")
@@ -1305,8 +1313,11 @@ class LaunchGUI(QMainWindow):
                 if widget and isinstance(widget, LaunchItem):
                     widget.set_selected(False)
         
-        # 如果是在"全部"标签页中搜索
         current_tab = self.tab_widget.currentWidget()
+        if current_tab and isinstance(current_tab, CategoryTab) and hasattr(current_tab, 'reset_to_first_page'):
+            current_tab.reset_to_first_page()
+        
+        # 如果是在"全部"标签页中搜索
         if current_tab and isinstance(current_tab, CategoryTab) and current_tab.category_name == "全部":
             # 直接在"全部"标签页中过滤
             for i in range(current_tab.content_layout.count()):
@@ -1393,12 +1404,16 @@ class LaunchGUI(QMainWindow):
         
         all_tab = self.tabs["全部"]
         
-        # 清空"全部"分类
-        while all_tab.content_layout.count():
-            widget = all_tab.content_layout.itemAt(0).widget()
-            if widget:
-                all_tab.content_layout.removeWidget(widget)
-                widget.setParent(None)
+        if hasattr(all_tab, 'begin_batch_update'):
+            all_tab.begin_batch_update()
+        if hasattr(all_tab, '_clear_all_launch_items'):
+            all_tab._clear_all_launch_items()
+        else:
+            while all_tab.content_layout.count():
+                widget = all_tab.content_layout.itemAt(0).widget()
+                if widget:
+                    all_tab.content_layout.removeWidget(widget)
+                    widget.setParent(None)
         
         # 获取要显示的程序列表（可能经过过滤）
         programs_to_show = config.get("programs", [])
@@ -1421,17 +1436,19 @@ class LaunchGUI(QMainWindow):
                 if not app:
                     continue
                 
-                # 创建启动项，添加所属分类信息
-                item = LaunchItem(name, app, params, category, tags)
-                item.set_category_tab(all_tab)
-                
-                # 设置右键菜单
-                item.setContextMenuPolicy(Qt.CustomContextMenu)
-                item.customContextMenuRequested.connect(
-                    lambda pos, i=item: all_tab.show_item_context_menu(pos, i)
-                )
-                
-                all_tab.content_layout.addWidget(item)
+                if hasattr(all_tab, 'add_launch_item'):
+                    all_tab.add_launch_item(name, app, params, tags=tags, source_category=category, defer_refresh=True)
+                else:
+                    item = LaunchItem(name, app, params, category, tags)
+                    item.set_category_tab(all_tab)
+                    item.setContextMenuPolicy(Qt.CustomContextMenu)
+                    item.customContextMenuRequested.connect(
+                        lambda pos, i=item: all_tab.show_item_context_menu(pos, i)
+                    )
+                    all_tab.content_layout.addWidget(item)
+        
+        if hasattr(all_tab, 'end_batch_update'):
+            all_tab.end_batch_update(reset_to_first=True)
 
     def closeEvent(self, event):
         """重写关闭事件，实现最小化到托盘而不是关闭"""

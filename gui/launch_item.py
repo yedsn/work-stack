@@ -43,6 +43,7 @@ class ParamLabel(QLabel):
 
 class LaunchItem(QFrame):
     """启动项组件"""
+    ICONS_ENABLED = False  # 暂时关闭图标加载以观察对首屏速度的影响
     _icon_cache = {}
     _fallback_icon_key = "__fallback__"
     _default_icon_size = QSize(32, 32)
@@ -105,18 +106,18 @@ class LaunchItem(QFrame):
         title_bar_layout.setContentsMargins(10, 15, 10, 15)  # 增加标题栏内边距
         
         # 创建标题标签，根据平台处理长标题
+        app_display_name = os.path.basename(app) if os.path.isabs(app) else app
         title_name = name
         # 如果名称过长，根据平台设置截断显示
         max_title_length = get_platform_setting('max_title_length')
         if max_title_length and len(title_name) > max_title_length:
             title_name = title_name[:max_title_length-2] + "..."
-            
-        title_label = QLabel(title_name)
+        self.title_label = QLabel(f"{title_name} - {app_display_name}")
         title_font = QFont()
         title_font.setBold(True)
         title_font.setPointSize(get_platform_setting('font_sizes.title'))
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("color: black; background-color: transparent;")
+        self.title_label.setFont(title_font)
+        self.title_label.setStyleSheet("color: black; background-color: transparent;")
         
         self.icon_label = QLabel()
         self.icon_size = QSize(self._default_icon_size)
@@ -125,9 +126,10 @@ class LaunchItem(QFrame):
         self.icon_label.setStyleSheet("background-color: transparent;")
         
         # 添加到标题栏布局
-        title_bar_layout.addWidget(self.icon_label)
-        title_bar_layout.addSpacing(8)
-        title_bar_layout.addWidget(title_label)
+        if self.ICONS_ENABLED:
+            title_bar_layout.addWidget(self.icon_label)
+            title_bar_layout.addSpacing(8)
+        title_bar_layout.addWidget(self.title_label)
         title_bar_layout.addStretch()
         
         # 添加标题栏到主布局
@@ -283,6 +285,10 @@ class LaunchItem(QFrame):
         """Update the cached pixmap for the launch item icon."""
         if not hasattr(self, "icon_label"):
             return
+        if not self.ICONS_ENABLED:
+            self.icon_label.hide()
+            return
+        self.icon_label.show()
         target = self._resolve_icon_target(self.app)
         pixmap = self._get_or_load_icon(self.app, target, self.icon_size, force)
         if pixmap:
@@ -291,7 +297,7 @@ class LaunchItem(QFrame):
     @classmethod
     def preload_icons(cls, apps):
         """Preload icons for the provided app collection to avoid repeated disk access."""
-        if not apps:
+        if not cls.ICONS_ENABLED or not apps:
             return
         for app in apps:
             target = cls._resolve_icon_target(app)

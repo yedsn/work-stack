@@ -150,7 +150,6 @@ class CategoryTab(QWidget):
     def update_programs_with_filter(self, filtered_programs):
         """使用过滤后的程序列表更新显示"""
         try:
-            # 预先收集所有应用以便批量加载图标
             app_set = set()
             for program in filtered_programs:
                 for launch_item in program.get("launch_items", []):
@@ -164,104 +163,77 @@ class CategoryTab(QWidget):
                 widget = self.content_layout.itemAt(i).widget()
                 if widget and isinstance(widget, LaunchItem):
                     widget.setParent(None)
-            
+
             # 添加过滤后的程序
             if self.category_name == "全部":
-                # "全部"分类显示所有过滤后的程序
                 for program in filtered_programs:
                     name = program.get("name", "")
                     category = program.get("category", "娱乐")
                     tags = program.get("tags", [])
-                    
                     if not name:
                         continue
-                    
                     for launch_item in program.get("launch_items", []):
                         app = launch_item.get("app", "")
                         params = launch_item.get("params", [])
-                        
                         if not app:
                             continue
-                        
-                        # 创建启动项，添加所属分类信息
-                        item = LaunchItem(name, app, params, category, tags)
+                        item = LaunchItem(name, app, params, source_category=category, tags=tags)
                         item.set_category_tab(self)
+                        item.setFocusPolicy(Qt.StrongFocus)
+                        if self.main_window:
+                            item.installEventFilter(self.main_window)
+                        item.setContextMenuPolicy(Qt.CustomContextMenu)
+                        item.customContextMenuRequested.connect(lambda pos, i=item: self.show_item_context_menu(pos, i))
                         self.content_layout.addWidget(item)
             else:
-                # 其他分类只显示属于该分类的程序
                 for program in filtered_programs:
                     name = program.get("name", "")
                     category = program.get("category", "娱乐")
                     tags = program.get("tags", [])
-                    
                     if not name or category != self.category_name:
                         continue
-                    
                     for launch_item in program.get("launch_items", []):
                         app = launch_item.get("app", "")
                         params = launch_item.get("params", [])
-                        
                         if not app:
                             continue
-                        
                         item = LaunchItem(name, app, params, tags=tags)
                         item.set_category_tab(self)
+                        item.setFocusPolicy(Qt.StrongFocus)
+                        if self.main_window:
+                            item.installEventFilter(self.main_window)
+                        item.setContextMenuPolicy(Qt.CustomContextMenu)
+                        item.customContextMenuRequested.connect(lambda pos, i=item: self.show_item_context_menu(pos, i))
                         self.content_layout.addWidget(item)
-            
-            # 更新空列表状态
+
             self.check_empty_list()
-            
         except Exception as e:
             logger.error(f"使用过滤器更新程序列表时出错: {e}")
 
-    def add_launch_item(self, name, app, params, tags=None):
+    def add_launch_item(self, name, app, params, tags=None, source_category=None, defer_refresh=False):
         """添加启动项"""
-        # 保存当前滚动位置
-        scroll_val = self.scroll_area.verticalScrollBar().value()
-        
-        # 创建并添加新项目  
-        item = LaunchItem(name, app, params, tags=tags)
+        item = LaunchItem(name, app, params, source_category=source_category, tags=tags)
         item.set_category_tab(self)
-        
-        # 确保每个项目都能接收焦点和键盘事件
         item.setFocusPolicy(Qt.StrongFocus)
-        
-        # 如果主窗口存在，为项目安装事件过滤器
         if self.main_window:
             item.installEventFilter(self.main_window)
-        
-        # 设置右键菜单
         item.setContextMenuPolicy(Qt.CustomContextMenu)
         item.customContextMenuRequested.connect(lambda pos, i=item: self.show_item_context_menu(pos, i))
-        
-        # 将新项目添加到顶部
         self.content_layout.insertWidget(0, item)
-        
-        # 确保滚动条位于顶部
         self.reset_scroll_position()
-        
-        # 检查是否需要隐藏空列表提示
         self.check_empty_list()
-        
-        # 在Mac上调整主窗口大小以适应内容
         import sys
         if sys.platform == 'darwin' and self.main_window:
             self.main_window.adjustSize()
-        
         return item
     
     def remove_launch_item(self, item):
         """移除启动项"""
         self.content_layout.removeWidget(item)
         item.deleteLater()
-        
-        # 检查是否需要显示空列表提示
         self.check_empty_list()
-        
-        # 在Mac上调整主窗口大小以适应内容
         import sys
         if sys.platform == 'darwin' and self.main_window:
-            # 延迟一点执行，确保UI已更新
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(100, self.main_window.adjustSize)
     
@@ -800,25 +772,43 @@ class CategoryTab(QWidget):
 
     def check_empty_list(self):
         """检查是否为空列表并显示相应提示"""
-        # 计算列表项数量（排除标题和分隔线）
-        item_count = 0
+        has_items = False
         for i in range(self.content_layout.count()):
             widget = self.content_layout.itemAt(i).widget()
-            if isinstance(widget, LaunchItem):
-                item_count += 1
-        
-        # 根据是否有列表项显示或隐藏空列表提示
-        if item_count == 0:
+            if widget and isinstance(widget, LaunchItem):
+                has_items = True
+                break
+        if not has_items:
             self.empty_label.show()
         else:
             self.empty_label.hide()
 
-        # 在Mac上根据项目数量调整窗口大小
         import sys
         if sys.platform == 'darwin' and self.main_window:
-            # 延迟一点执行，确保UI已更新
             from PyQt5.QtCore import QTimer
             QTimer.singleShot(100, self.main_window.adjustSize)
+
+    def begin_batch_update(self):
+        """分页兼容方法，无操作"""
+        pass
+
+    def end_batch_update(self, reset_to_first=False):
+        """分页兼容方法，无操作"""
+        pass
+
+    def reset_to_first_page(self):
+        """分页兼容方法，改为滚动到顶部"""
+        self.reset_scroll_position()
+
+    def _clear_all_launch_items(self):
+        """供主窗口批量清空使用"""
+        for i in reversed(range(self.content_layout.count())):
+            widget = self.content_layout.itemAt(i).widget()
+            if widget and isinstance(widget, LaunchItem):
+                self.content_layout.removeWidget(widget)
+                widget.setParent(None)
+                widget.deleteLater()
+        self.check_empty_list()
 
     def resizeEvent(self, event):
         """重写调整大小事件，确保内容宽度正确"""
