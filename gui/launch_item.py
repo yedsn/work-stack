@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import os
+import shutil
 import subprocess
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QPushButton, QApplication, QFrame, QGraphicsDropShadowEffect, QMenu, QSizePolicy)
-from PyQt5.QtCore import Qt, QMimeData
+                           QPushButton, QApplication, QFrame, QGraphicsDropShadowEffect, QMenu, QSizePolicy,
+                           QFileIconProvider)
+from PyQt5.QtCore import Qt, QMimeData, QSize, QFileInfo
 from PyQt5.QtGui import QDrag, QPixmap, QFont, QCursor, QColor
 from utils.app_launcher import open_app
 from gui.flow_layout import FlowLayout
@@ -98,7 +100,14 @@ class LaunchItem(QFrame):
         title_label.setFont(title_font)
         title_label.setStyleSheet("color: black; background-color: transparent;")
         
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(QSize(32, 32))
+        self.icon_label.setScaledContents(True)
+        self.icon_label.setStyleSheet("background-color: transparent;")
+        
         # 添加到标题栏布局
+        title_bar_layout.addWidget(self.icon_label)
+        title_bar_layout.addSpacing(8)
         title_bar_layout.addWidget(title_label)
         title_bar_layout.addStretch()
         
@@ -247,6 +256,134 @@ class LaunchItem(QFrame):
         
         # 设置光标
         self.setCursor(QCursor(Qt.PointingHandCursor))
+        
+        # 预加载程序图标
+        self._update_program_icon(force=True)
+
+    def _update_program_icon(self, force=False):
+        """Update the cached pixmap for the launch item icon."""
+        if not hasattr(self, "icon_label"):
+            return
+        target = self._resolve_icon_target()
+        if not force and getattr(self, "_last_icon_target", None) == target:
+            return
+        self._last_icon_target = target
+        pixmap = self._load_icon_pixmap(target)
+        if pixmap:
+            self.icon_label.setPixmap(pixmap)
+
+    def _resolve_icon_target(self):
+        """Best-effort location of the executable or bundle for icon extraction."""
+        app_value = self.app or ""
+        if not app_value:
+            return None
+        expanded = os.path.expandvars(os.path.expanduser(app_value))
+        if os.path.isabs(expanded) and os.path.exists(expanded):
+            return expanded
+        if os.path.exists(expanded):
+            return os.path.abspath(expanded)
+        if is_windows():
+            candidate = expanded
+            if not candidate.lower().endswith(".exe"):
+                exe_candidate = candidate + ".exe"
+            else:
+                exe_candidate = candidate
+            if os.path.exists(exe_candidate):
+                return os.path.abspath(exe_candidate)
+        resolved = shutil.which(expanded)
+        if resolved:
+            return resolved
+        for path in self._build_known_app_paths(expanded):
+            if path and os.path.exists(path):
+                return path
+        return None
+
+    def _build_known_app_paths(self, app_name):
+        """Return known installation paths for popular apps."""
+        candidates = []
+        normalized = (app_name or "").lower()
+        if not normalized:
+            return candidates
+        if is_windows():
+            local_appdata = os.environ.get("LOCALAPPDATA", "")
+            program_files = os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles")
+            program_files_x86 = os.environ.get("ProgramFiles(x86)")
+            def _append(path):
+                if path and path not in candidates:
+                    candidates.append(path)
+            if normalized in {"edge", "msedge"}:
+                for base in filter(None, [program_files, program_files_x86]):
+                    _append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+            elif normalized in {"chrome", "google-chrome"}:
+                for base in filter(None, [program_files, program_files_x86]):
+                    _append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
+            elif normalized in {"vscode", "code"}:
+                if local_appdata:
+                    _append(os.path.join(local_appdata, "Programs", "Microsoft VS Code", "Code.exe"))
+                for base in filter(None, [program_files, program_files_x86]):
+                    _append(os.path.join(base, "Microsoft VS Code", "Code.exe"))
+            elif normalized == "cursor":
+                if local_appdata:
+                    _append(os.path.join(local_appdata, "Programs", "Cursor", "Cursor.exe"))
+            elif normalized == "obsidian":
+                if local_appdata:
+                    _append(os.path.join(local_appdata, "Programs", "obsidian", "Obsidian.exe"))
+                for base in filter(None, [program_files, program_files_x86]):
+                    _append(os.path.join(base, "Obsidian", "Obsidian.exe"))
+        elif is_mac():
+            app_mapping = {
+                "edge": "/Applications/Microsoft Edge.app",
+                "msedge": "/Applications/Microsoft Edge.app",
+                "chrome": "/Applications/Google Chrome.app",
+                "google-chrome": "/Applications/Google Chrome.app",
+                "vscode": "/Applications/Visual Studio Code.app",
+                "code": "/Applications/Visual Studio Code.app",
+                "cursor": "/Applications/Cursor.app",
+                "obsidian": "/Applications/Obsidian.app",
+            }
+            candidate = app_mapping.get(normalized)
+            if candidate:
+                candidates.append(candidate)
+        else:
+            # Linux/unix systems typically expose commands on PATH, so rely on shutil.which
+            pass
+        return candidates
+
+    def _load_icon_pixmap(self, target_path):
+        """Load the pixmap for the resolved path or fallback icon."""
+        size = self.icon_label.size() if hasattr(self, "icon_label") else QSize(32, 32)
+        provider = QFileIconProvider()
+        if target_path:
+            file_info = QFileInfo(target_path)
+            icon = provider.icon(file_info)
+            if icon and not icon.isNull():
+                pixmap = icon.pixmap(size)
+                if not pixmap.isNull():
+                    return pixmap
+            direct_pixmap = QPixmap(target_path)
+            if not direct_pixmap.isNull():
+                return direct_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            if target_path.lower().endswith(".app") and os.path.isdir(target_path):
+                executable_name = os.path.splitext(os.path.basename(target_path))[0]
+                bundle_exec = os.path.join(target_path, "Contents", "MacOS", executable_name)
+                if os.path.exists(bundle_exec):
+                    icon = provider.icon(QFileInfo(bundle_exec))
+                    pixmap = icon.pixmap(size)
+                    if not pixmap.isNull():
+                        return pixmap
+        fallback = self._get_default_icon_path()
+        fallback_pixmap = QPixmap(fallback) if fallback else QPixmap()
+        if fallback_pixmap.isNull():
+            placeholder = QPixmap(size)
+            placeholder.fill(Qt.lightGray)
+            return placeholder
+        return fallback_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+    def _get_default_icon_path(self):
+        """Return bundled fallback icon path."""
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        fallback_path = os.path.join(base_dir, "resources", "icon.png")
+        return fallback_path if os.path.exists(fallback_path) else ""
     
     def set_category_tab(self, category_tab):
         """设置所属分类标签页"""
@@ -269,12 +406,19 @@ class LaunchItem(QFrame):
     
     def _do_update_display(self):
         """执行实际的显示更新"""
+        self._update_program_icon()
         # 更新标题
         if self.layout().count() > 0:
             title_bar = self.layout().itemAt(0).widget()
             if title_bar and title_bar.layout() and title_bar.layout().count() > 0:
-                title_label = title_bar.layout().itemAt(0).widget()
-                if title_label and isinstance(title_label, QLabel):
+                title_label = None
+                for i in range(title_bar.layout().count()):
+                    item = title_bar.layout().itemAt(i)
+                    widget = item.widget() if item else None
+                    if widget and isinstance(widget, QLabel) and widget is not self.icon_label:
+                        title_label = widget
+                        break
+                if title_label:
                     # 如果名称过长，根据平台设置截断显示
                     title_name = self.name
                     max_title_length = get_platform_setting('max_title_length')
