@@ -941,16 +941,39 @@ class LaunchGUI(QMainWindow):
         
         # 获取当前标签页
         current_tab = self.tab_widget.currentWidget()
-        if current_tab and isinstance(current_tab, CategoryTab):
-            current_tab.add_launch_item(name, app, params, [])
-            
-            # 清空输入框
-            self.name_input.clear()
-            self.app_input.clear()
-            self.params_input.clear()
-            
-            # 更新配置
-            self.update_config_debounced()
+        target_tab = current_tab if isinstance(current_tab, CategoryTab) else None
+
+        # "全部" 分类不允许直接添加项目，需要用户选择具体分类
+        if target_tab and target_tab.category_name == "全部":
+            categories = [c for c in self.tabs.keys() if c != "全部"]
+            if not categories:
+                QMessageBox.warning(self, "无法添加", "请先创建一个分类再添加启动项。")
+                return
+            category, ok = QInputDialog.getItem(
+                self,
+                "选择分类",
+                "请选择要添加到的分类：",
+                categories,
+                0,
+                False
+            )
+            if not ok or not category:
+                return
+            target_tab = self.tabs.get(category)
+
+        if target_tab and isinstance(target_tab, CategoryTab):
+            target_tab.add_launch_item(name, app, params, [])
+        else:
+            QMessageBox.warning(self, "无法添加", "请先选择一个有效的分类标签。")
+            return
+        
+        # 清空输入框
+        self.name_input.clear()
+        self.app_input.clear()
+        self.params_input.clear()
+        
+        # 更新配置
+        self.update_config_debounced()
     
     def browse_app(self):
         """浏览选择应用"""
@@ -2064,6 +2087,18 @@ class LaunchGUI(QMainWindow):
                         if (widget.params is None and item.params is None) or \
                            (widget.params == item.params):
                             return category
+        return None
+
+    def find_launch_item_widget(self, category, name, app, params):
+        """在指定分类中查找与给定信息匹配的启动项"""
+        tab = self.tabs.get(category)
+        if not tab:
+            return None
+        for i in range(tab.content_layout.count()):
+            widget = tab.content_layout.itemAt(i).widget()
+            if widget and isinstance(widget, LaunchItem):
+                if widget.name == name and widget.app == app and widget.params == params:
+                    return widget
         return None
 
     def update_category(self, category):

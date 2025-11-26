@@ -365,6 +365,27 @@ class CategoryTab(QWidget):
     
     def edit_launch_item(self, item):
         """编辑启动项"""
+        # 如果在"全部"分类中，定位真实所属分类的项目
+        real_item = None
+        source_category = getattr(item, "source_category", None)
+        original_name = item.name
+        original_app = item.app
+        original_params = item.params.copy() if item.params else []
+
+        if self.category_name == "全部" and self.main_window:
+            if not source_category:
+                source_category = self.main_window.find_item_original_category(item)
+            if source_category:
+                real_item = self.main_window.find_launch_item_widget(
+                    source_category,
+                    original_name,
+                    original_app,
+                    original_params
+                )
+        else:
+            source_category = self.category_name
+            real_item = item
+
         # 创建编辑对话框
         dialog = QDialog(self)
         dialog.setWindowTitle("编辑启动项")
@@ -412,10 +433,32 @@ class CategoryTab(QWidget):
         # 显示对话框
         if dialog.exec_() == QDialog.Accepted:
             # 更新启动项
-            item.name = name_input.text()
-            item.app = app_input.text()
-            item.params = params_input.text().split() if params_input.text() else []
+            new_name = name_input.text().strip()
+            new_app = app_input.text().strip()
+            params_text = params_input.text().strip()
+            if params_text:
+                if params_text.startswith("[") and params_text.endswith("]"):
+                    try:
+                        new_params = json.loads(params_text)
+                    except Exception:
+                        new_params = params_text.split()
+                else:
+                    new_params = params_text.split()
+            else:
+                new_params = []
+
+            item.name = new_name
+            item.app = new_app
+            item.params = new_params.copy()
             item.update_display()
+
+            # 如果在"全部"分类中，更新真实分类下的项目
+            if self.category_name == "全部" and self.main_window and real_item and real_item is not item:
+                real_item.name = new_name
+                real_item.app = new_app
+                real_item.params = new_params.copy()
+                real_item.update_display()
+                item.source_category = source_category
             
             # 更新配置
             if self.main_window:
