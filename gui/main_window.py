@@ -6,6 +6,7 @@ import os
 import sys
 import math
 import time
+import subprocess
 import psutil
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QLabel, QLineEdit, 
@@ -22,7 +23,7 @@ from gui.category_tab import CategoryTab
 from utils.config_manager import (load_config, save_config, flush_config, 
                                   get_available_tags, get_tag_filter_state, 
                                   update_tag_filter_state, filter_programs_by_tags,
-                                  add_available_tag)
+                                  add_available_tag, CONFIG_PATH)
 from gui.launch_item import LaunchItem
 from utils.logger import get_logger
 from utils.platform_settings import (get_platform_style, get_platform_setting, 
@@ -1196,6 +1197,11 @@ class LaunchGUI(QMainWindow):
         edit_config_action.triggered.connect(lambda: self.toggle_view() if self.stacked_widget.currentIndex() == 0 else None)
         config_menu.addAction(edit_config_action)
         
+        # 使用系统默认编辑器打开配置文件
+        external_edit_action = QAction("用系统编辑器打开配置", self)
+        external_edit_action.triggered.connect(self.open_config_in_system_editor)
+        config_menu.addAction(external_edit_action)
+        
         # 查看配置历史
         history_action = QAction("历史变更记录", self)
         history_action.triggered.connect(self.show_config_history)
@@ -1279,6 +1285,25 @@ class LaunchGUI(QMainWindow):
             menu.exec_(button.mapToGlobal(QPoint(0, button.height())))
         else:
             menu.exec_(QCursor.pos())
+
+    def open_config_in_system_editor(self):
+        """Use the system default text editor to open config.json."""
+        try:
+            if not os.path.exists(CONFIG_PATH):
+                QMessageBox.warning(self, "未找到配置", f"配置文件不存在:\n{CONFIG_PATH}")
+                return
+
+            if is_windows():
+                os.startfile(CONFIG_PATH)
+            elif is_mac():
+                subprocess.Popen(["open", CONFIG_PATH])
+            elif is_linux():
+                subprocess.Popen(["xdg-open", CONFIG_PATH])
+            else:
+                raise RuntimeError("当前平台不支持自动打开配置文件")
+        except Exception as e:
+            self.logger.error(f"调用系统编辑器打开配置失败: {e}")
+            QMessageBox.critical(self, "打开失败", f"无法用系统编辑器打开配置文件:\n{e}")
 
     def refresh_from_config(self):
         """刷新并从配置文件重新加载数据"""
