@@ -6,6 +6,7 @@ import os
 import sys
 import math
 import time
+import copy
 import psutil
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QLabel, QLineEdit, 
@@ -324,6 +325,11 @@ class LaunchGUI(QMainWindow):
         self._config_cache = None
         self._config_cache_time = 0
         self._config_cache_timeout = 5  # 缓存5秒
+        # 后台刷新挂起状态
+        self._pending_ui_refresh = False
+        self._pending_config_snapshot = None
+        self._pending_refresh_timestamp = 0
+        self._pending_refresh_source = ""
         
         # 热键管理器引用（由主程序设置）
         self.hotkey_manager = None
@@ -1654,6 +1660,70 @@ class LaunchGUI(QMainWindow):
         self.search_input.setFocus()
         self.search_input.selectAll()  # 全选当前文本，方便用户直接输入
 
+    def apply_background_config(self, config_data, source="后台刷新"):
+        """仅更新配置数据并标记下次显示时刷新UI"""
+        if not config_data:
+            self.logger.warning("收到空配置，跳过后台刷新")
+            return False
+        try:
+            save_config(config_data)
+            # 保存历史记录
+            if hasattr(self, 'history_manager') and self.history_manager:
+                try:
+                    self.history_manager.save_history(config_data, source)
+                except Exception as history_err:
+                    self.logger.warning(f"保存历史记录失败: {history_err}")
+
+            snapshot = copy.deepcopy(config_data)
+            # 更新本地缓存以便 get_cached_config 使用
+            self._config_cache = snapshot
+            self._config_cache_time = time.time()
+            self._set_pending_refresh_state(snapshot, source)
+            self.logger.info(f"已记录后台配置刷新，来源: {source}")
+            return True
+        except Exception as e:
+            self.logger.error(f"后台刷新配置失败: {e}")
+            return False
+
+    def _set_pending_refresh_state(self, snapshot, source):
+        """保存待刷新快照"""
+        self._pending_config_snapshot = snapshot
+        self._pending_refresh_timestamp = time.time()
+        self._pending_refresh_source = source
+        self._pending_ui_refresh = True
+
+    def apply_pending_refresh_if_needed(self, reason="showEvent", force=False):
+        """在窗口可见/需要立即刷新时应用后台配置"""
+        if not self._pending_ui_refresh and not force:
+            return False
+
+        config_to_apply = self._pending_config_snapshot
+        if config_to_apply is None:
+            # 快照缺失时退回磁盘配置
+            config_to_apply = load_config()
+
+        applied = False
+        try:
+            snapshot = copy.deepcopy(config_to_apply)
+            self.update_ui_with_config(snapshot)
+            self.update_statistics()
+            elapsed_ms = 0
+            if self._pending_refresh_timestamp:
+                elapsed_ms = (time.time() - self._pending_refresh_timestamp) * 1000
+            self.logger.info(
+                f"已应用待刷新配置 (原因: {reason}, 来源: {self._pending_refresh_source}, 延迟: {elapsed_ms:.0f}ms)"
+            )
+            applied = True
+        except Exception as e:
+            self.logger.error(f"应用后台刷新配置失败: {e}")
+        finally:
+            if applied or force:
+                self._pending_ui_refresh = False
+                self._pending_config_snapshot = None
+                self._pending_refresh_timestamp = 0
+                self._pending_refresh_source = ""
+        return applied
+
     def get_window_handle(self):
         """获取窗口句柄"""
         if is_windows():
@@ -2376,17 +2446,14 @@ class LaunchGUI(QMainWindow):
         
         # 处理结果
         if success and config_data:
-            # 保存配置
-            from utils.config_manager import save_config
-            save_config(config_data)
-            
-            # 保存历史记录
-            self.history_manager.save_history(config_data, "从同步服务下载配置")
-            
-            # 重新加载配置
-            self.load_config()
-            # 更新统计信息
-            self.update_statistics()
+            source_desc = "从同步服务下载配置"
+            if not self.apply_background_config(config_data, source_desc):
+                QMessageBox.warning(self, "下载成功但应用失败", "配置已下载，但写入本地时出错。")
+                return
+            if self.isVisible():
+                self.apply_pending_refresh_if_needed(reason="download-visible", force=True)
+            else:
+                self.logger.info("窗口隐藏，延迟应用下载的配置刷新")
             QMessageBox.information(self, "下载成功", f"{message}，配置已应用")
         else:
             QMessageBox.warning(self, "下载失败", message)
@@ -2461,22 +2528,15 @@ class LaunchGUI(QMainWindow):
             self._sync_in_progress = False
             
             if success and config_data:
-                # 保存配置
-                from utils.config_manager import save_config
-                save_config(config_data)
-                
-                # 保存历史记录
-                self.history_manager.save_history(config_data, "自动同步配置")
-                
-                # 只有在窗口隐藏时才重新加载配置，避免影响用户操作
-                if not self.isVisible():
-                    # 重新加载配置
-                    self.load_config()
-                    # 更新统计信息
-                    self.update_statistics()
-                    self.logger.info("已自动从同步服务同步配置")
+                source_desc = "自动同步配置"
+                deferred = self.apply_background_config(config_data, source_desc)
+                if not deferred:
+                    self.logger.error("自动同步配置写入失败，已跳过刷新")
+                    return
+                if self.isVisible():
+                    self.apply_pending_refresh_if_needed(reason="auto-sync-visible", force=True)
                 else:
-                    self.logger.info("自动同步完成，但窗口已显示，跳过配置更新")
+                    self.logger.info("窗口隐藏，已记录自动同步结果，待下次显示时刷新")
             else:
                 self.logger.warning(f"自动同步配置失败: {message}")
         except Exception as e:
@@ -2560,6 +2620,10 @@ class LaunchGUI(QMainWindow):
         
         import time
         start_time = time.time()
+
+        if self._pending_ui_refresh:
+            self.logger.debug("检测到待刷新配置，showEvent 中立即应用")
+            self.apply_pending_refresh_if_needed(reason="showEvent")
         
         # 暂停热键检测在窗口恢复期间，减少CPU竞争
         if self.hotkey_manager and hasattr(self.hotkey_manager, 'pause_checking'):
