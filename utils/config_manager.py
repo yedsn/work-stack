@@ -5,7 +5,7 @@ import os
 import json
 import time
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from utils.logger import get_logger
 
 # 获取日志记录器
@@ -23,6 +23,7 @@ _last_save_time = 0
 _save_timer = None
 _save_lock = threading.Lock()
 SAVE_DELAY = 1.0  # 延迟保存时间（秒）
+DEFAULT_ICON_CACHE_CAPACITY = 128
 
 def load_config() -> Dict[str, Any]:
     """加载配置文件（使用缓存）"""
@@ -176,6 +177,54 @@ def add_available_tag(config: Dict[str, Any], tag: str) -> Dict[str, Any]:
     if tag not in available_tags:
         available_tags.append(tag)
         config["available_tags"] = available_tags
+    return config
+
+def get_ui_preferences(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    获取界面偏好设置
+    """
+    prefs = config.get("ui_preferences")
+    return prefs if isinstance(prefs, dict) else {}
+
+def is_launch_icon_enabled(config: Dict[str, Any]) -> bool:
+    """
+    返回是否启用启动项图标渲染
+    """
+    prefs = get_ui_preferences(config)
+    return prefs.get("launch_icons_enabled", True)
+
+def set_launch_icon_enabled(config: Dict[str, Any], enabled: bool) -> Dict[str, Any]:
+    """
+    更新启动项图标开关
+    """
+    prefs = get_ui_preferences(config).copy()
+    prefs["launch_icons_enabled"] = bool(enabled)
+    config["ui_preferences"] = prefs
+    return config
+
+def get_icon_cache_capacity(config: Dict[str, Any]) -> int:
+    """
+    获取图标缓存容量
+    """
+    prefs = get_ui_preferences(config)
+    value = prefs.get("icon_cache_capacity", DEFAULT_ICON_CACHE_CAPACITY)
+    try:
+        capacity = int(value)
+        return capacity if capacity > 0 else DEFAULT_ICON_CACHE_CAPACITY
+    except (TypeError, ValueError):
+        return DEFAULT_ICON_CACHE_CAPACITY
+
+def set_icon_cache_capacity(config: Dict[str, Any], capacity: int) -> Dict[str, Any]:
+    """
+    设置图标缓存容量
+    """
+    prefs = get_ui_preferences(config).copy()
+    try:
+        normalized = max(16, int(capacity))
+    except (TypeError, ValueError):
+        normalized = DEFAULT_ICON_CACHE_CAPACITY
+    prefs["icon_cache_capacity"] = normalized
+    config["ui_preferences"] = prefs
     return config
 
 def get_tag_filter_state(config: Dict[str, Any]) -> Dict[str, Any]:

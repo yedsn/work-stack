@@ -5,8 +5,7 @@ import os
 import shutil
 import subprocess
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QPushButton, QApplication, QFrame, QGraphicsDropShadowEffect, QMenu, QSizePolicy,
-                           QFileIconProvider)
+                           QPushButton, QApplication, QFrame, QGraphicsDropShadowEffect, QMenu, QSizePolicy)
 from PyQt5.QtCore import Qt, QMimeData, QSize, QFileInfo
 from PyQt5.QtGui import QDrag, QPixmap, QFont, QCursor, QColor
 from utils.app_launcher import open_app
@@ -14,6 +13,7 @@ from gui.flow_layout import FlowLayout
 from utils.logger import get_logger
 from utils.platform_settings import (is_windows, is_mac, is_linux, 
                                     get_platform_style, get_platform_setting)
+from gui.icon_loader import get_icon_loader
 
 RESOURCE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "resources"))
 APP_ICON_DIR = os.path.join(RESOURCE_DIR, "app-icons")
@@ -43,20 +43,8 @@ class ParamLabel(QLabel):
 
 class LaunchItem(QFrame):
     """启动项组件"""
-    ICONS_ENABLED = False  # 暂时关闭图标加载以观察对首屏速度的影响
-    _icon_cache = {}
-    _fallback_icon_key = "__fallback__"
+    ICONS_ENABLED = True
     _default_icon_size = QSize(32, 32)
-    _builtin_icons = {
-        "edge": os.path.join(APP_ICON_DIR, "edge.png"),
-        "msedge": os.path.join(APP_ICON_DIR, "edge.png"),
-        "microsoftedge": os.path.join(APP_ICON_DIR, "edge.png"),
-        "vscode": os.path.join(APP_ICON_DIR, "vscode.png"),
-        "code": os.path.join(APP_ICON_DIR, "vscode.png"),
-        "cursor": os.path.join(APP_ICON_DIR, "cursor.png"),
-        "obsidian": os.path.join(APP_ICON_DIR, "obsidian.png"),
-        "navicat": os.path.join(APP_ICON_DIR, "navicat.png"),
-    }
     
     def __init__(self, name, app, params=None, source_category=None, tags=None):
         super().__init__()
@@ -67,6 +55,9 @@ class LaunchItem(QFrame):
         self.category_tab = None
         self.source_category = source_category  # 添加所属分类属性
         self.is_selected = False  # 添加选中状态
+        self._icon_ticket = None
+        self._icon_loader = get_icon_loader()
+        self._icon_loader.icon_ready.connect(self._handle_icon_ready)
         
         # 记录创建启动项的日志
         logger.debug(f"创建启动项: 名称={name}, 应用={app}, 参数={params}")
@@ -112,7 +103,7 @@ class LaunchItem(QFrame):
         max_title_length = get_platform_setting('max_title_length')
         if max_title_length and len(title_name) > max_title_length:
             title_name = title_name[:max_title_length-2] + "..."
-        self.title_label = QLabel(f"{title_name} - {app_display_name}")
+        self.title_label = QLabel(f"{title_name}")
         title_font = QFont()
         title_font.setBold(True)
         title_font.setPointSize(get_platform_setting('font_sizes.title'))
@@ -282,209 +273,34 @@ class LaunchItem(QFrame):
         self._update_program_icon(force=True)
 
     def _update_program_icon(self, force=False):
-        """Update the cached pixmap for the launch item icon."""
+        """Request icon rendering via the shared loader."""
         if not hasattr(self, "icon_label"):
             return
         if not self.ICONS_ENABLED:
             self.icon_label.hide()
             return
         self.icon_label.show()
-        target = self._resolve_icon_target(self.app)
-        pixmap = self._get_or_load_icon(self.app, target, self.icon_size, force)
-        if pixmap:
-            self.icon_label.setPixmap(pixmap)
+        placeholder = self._icon_loader.get_placeholder_pixmap(self.icon_size)
+        if placeholder:
+            self.icon_label.setPixmap(placeholder)
+        self._icon_ticket = self._icon_loader.request_icon(self.app, self.icon_size)
 
     @classmethod
     def preload_icons(cls, apps):
-        """Preload icons for the provided app collection to avoid repeated disk access."""
-        if not cls.ICONS_ENABLED or not apps:
+        """Compatibility stub retained for API parity."""
+        loader = get_icon_loader()
+        for app in apps or []:
+            loader.prime_icon(app, cls._default_icon_size)
+
+    def _handle_icon_ready(self, ticket: str, pixmap: QPixmap):
+        if not self.ICONS_ENABLED:
             return
-        for app in apps:
-            target = cls._resolve_icon_target(app)
-            cls._get_or_load_icon(app, target, cls._default_icon_size)
-
-    @classmethod
-    def _make_icon_cache_key(cls, target, size):
-        width = size.width() if isinstance(size, QSize) else size[0]
-        height = size.height() if isinstance(size, QSize) else size[1]
-        return (target or cls._fallback_icon_key, width, height)
-
-    @classmethod
-    def _get_or_load_icon(cls, app_value, target, size, force=False):
-        builtin_path = cls._get_builtin_icon_path(app_value)
-        cache_identity = builtin_path or target or cls._fallback_icon_key
-        cache_key = cls._make_icon_cache_key(cache_identity, size)
-        if not force:
-            cached = cls._icon_cache.get(cache_key)
-            if cached:
-                return cached
-        pixmap = None
-        if builtin_path:
-            pixmap = cls._load_pixmap_from_file(builtin_path, size)
-        if pixmap is None and target:
-            pixmap = cls._load_icon_pixmap(target, size)
-        if pixmap is None:
-            pixmap = cls._load_fallback_pixmap(size)
-        if pixmap:
-            cls._icon_cache[cache_key] = QPixmap(pixmap)
-            return cls._icon_cache[cache_key]
-        return None
-
-    @classmethod
-    def _get_builtin_icon_path(cls, app_value):
-        normalized = cls._normalize_app_name(app_value)
-        if not normalized:
-            return None
-        path = cls._builtin_icons.get(normalized)
-        if path and os.path.exists(path):
-            return path
-        return None
-
-    @classmethod
-    def _normalize_app_name(cls, app_value):
-        if not app_value:
-            return ""
-        lowered = app_value.strip().lower()
-        if not lowered:
-            return ""
-        base = os.path.basename(lowered)
-        base = base or lowered
-        root, _ = os.path.splitext(base)
-        return root or base
-
-    @classmethod
-    def _resolve_icon_target(cls, app_value):
-        """Best-effort location of the executable or bundle for icon extraction."""
-        app_value = app_value or ""
-        if not app_value:
-            return None
-        expanded = os.path.expandvars(os.path.expanduser(app_value))
-        if os.path.isabs(expanded) and os.path.exists(expanded):
-            return expanded
-        if os.path.exists(expanded):
-            return os.path.abspath(expanded)
-        if is_windows():
-            candidate = expanded
-            if not candidate.lower().endswith(".exe"):
-                exe_candidate = candidate + ".exe"
-            else:
-                exe_candidate = candidate
-            if os.path.exists(exe_candidate):
-                return os.path.abspath(exe_candidate)
-        resolved = shutil.which(expanded)
-        if resolved:
-            return resolved
-        for path in cls._build_known_app_paths(expanded):
-            if path and os.path.exists(path):
-                return path
-        return None
-
-    @classmethod
-    def _build_known_app_paths(cls, app_name):
-        """Return known installation paths for popular apps."""
-        candidates = []
-        normalized = (app_name or "").lower()
-        if not normalized:
-            return candidates
-        if is_windows():
-            local_appdata = os.environ.get("LOCALAPPDATA", "")
-            program_files = os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles")
-            program_files_x86 = os.environ.get("ProgramFiles(x86)")
-            def _append(path):
-                if path and path not in candidates:
-                    candidates.append(path)
-            if normalized in {"edge", "msedge"}:
-                for base in filter(None, [program_files, program_files_x86]):
-                    _append(os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
-            elif normalized in {"chrome", "google-chrome"}:
-                for base in filter(None, [program_files, program_files_x86]):
-                    _append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
-            elif normalized in {"vscode", "code"}:
-                if local_appdata:
-                    _append(os.path.join(local_appdata, "Programs", "Microsoft VS Code", "Code.exe"))
-                for base in filter(None, [program_files, program_files_x86]):
-                    _append(os.path.join(base, "Microsoft VS Code", "Code.exe"))
-            elif normalized == "cursor":
-                if local_appdata:
-                    _append(os.path.join(local_appdata, "Programs", "Cursor", "Cursor.exe"))
-            elif normalized == "obsidian":
-                if local_appdata:
-                    _append(os.path.join(local_appdata, "Programs", "obsidian", "Obsidian.exe"))
-                for base in filter(None, [program_files, program_files_x86]):
-                    _append(os.path.join(base, "Obsidian", "Obsidian.exe"))
-        elif is_mac():
-            app_mapping = {
-                "edge": "/Applications/Microsoft Edge.app",
-                "msedge": "/Applications/Microsoft Edge.app",
-                "chrome": "/Applications/Google Chrome.app",
-                "google-chrome": "/Applications/Google Chrome.app",
-                "vscode": "/Applications/Visual Studio Code.app",
-                "code": "/Applications/Visual Studio Code.app",
-                "cursor": "/Applications/Cursor.app",
-                "obsidian": "/Applications/Obsidian.app",
-            }
-            candidate = app_mapping.get(normalized)
-            if candidate:
-                candidates.append(candidate)
-        else:
-            # Linux/unix systems typically expose commands on PATH, so rely on shutil.which
-            pass
-        return candidates
-
-    @classmethod
-    def _load_icon_pixmap(cls, target_path, size):
-        """Load the pixmap for the resolved path or fallback icon."""
-        provider = QFileIconProvider()
-        if target_path:
-            file_info = QFileInfo(target_path)
-            icon = provider.icon(file_info)
-            if icon and not icon.isNull():
-                pixmap = icon.pixmap(size)
-                if not pixmap.isNull():
-                    return pixmap
-            direct_pixmap = QPixmap(target_path)
-            if not direct_pixmap.isNull():
-                return direct_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            if target_path.lower().endswith(".app") and os.path.isdir(target_path):
-                executable_name = os.path.splitext(os.path.basename(target_path))[0]
-                bundle_exec = os.path.join(target_path, "Contents", "MacOS", executable_name)
-                if os.path.exists(bundle_exec):
-                    icon = provider.icon(QFileInfo(bundle_exec))
-                    pixmap = icon.pixmap(size)
-                    if not pixmap.isNull():
-                        return pixmap
-        return cls._load_fallback_pixmap(size)
-
-    @classmethod
-    def _load_pixmap_from_file(cls, file_path, size):
-        pixmap = QPixmap(file_path)
-        if pixmap.isNull():
-            return None
-        if pixmap.size() == size:
-            return pixmap
-        return pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-    @classmethod
-    def _load_fallback_pixmap(cls, size):
-        cache_key = cls._make_icon_cache_key(cls._fallback_icon_key, size)
-        cached = cls._icon_cache.get(cache_key)
-        if cached:
-            return cached
-        fallback = cls._get_default_icon_path()
-        fallback_pixmap = QPixmap(fallback) if fallback else QPixmap()
-        if fallback_pixmap.isNull():
-            placeholder = QPixmap(size)
-            placeholder.fill(Qt.lightGray)
-            cls._icon_cache[cache_key] = placeholder
-            return placeholder
-        scaled = fallback_pixmap.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        cls._icon_cache[cache_key] = QPixmap(scaled)
-        return scaled
-
-    @classmethod
-    def _get_default_icon_path(cls):
-        """Return bundled fallback icon path."""
-        return DEFAULT_ICON_PATH if os.path.exists(DEFAULT_ICON_PATH) else ""
+        if not self.icon_label:
+            return
+        if ticket != self._icon_ticket:
+            return
+        if pixmap and not pixmap.isNull():
+            self.icon_label.setPixmap(pixmap)
     
     def set_category_tab(self, category_tab):
         """设置所属分类标签页"""

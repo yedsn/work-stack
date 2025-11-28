@@ -20,7 +20,9 @@ from gui.category_tab import CategoryTab
 from utils.config_manager import (load_config, save_config, flush_config, 
                                   get_available_tags, get_tag_filter_state, 
                                   update_tag_filter_state, filter_programs_by_tags,
-                                  add_available_tag)
+                                  add_available_tag, is_launch_icon_enabled,
+                                  set_launch_icon_enabled, get_icon_cache_capacity,
+                                  set_icon_cache_capacity)
 from gui.launch_item import LaunchItem
 from utils.logger import get_logger
 from utils.platform_settings import (get_platform_style, get_platform_setting, 
@@ -33,6 +35,7 @@ from gui.config_history_dialog import ConfigHistoryDialog
 from utils.config_history import ConfigHistoryManager
 from gui.tag_filter_compact import TagFilterCompact
 from gui.tag_manager_dialog import TagManagerDialog
+from gui.icon_loader import get_icon_loader
 
 # 配置加载器类
 class ConfigLoader(QObject):
@@ -825,6 +828,12 @@ class LaunchGUI(QMainWindow):
             
             start_time = time.time()
             
+            icon_enabled = is_launch_icon_enabled(config)
+            LaunchItem.ICONS_ENABLED = icon_enabled
+            icon_loader = get_icon_loader()
+            icon_loader.set_enabled(icon_enabled)
+            icon_loader.set_cache_capacity(get_icon_cache_capacity(config))
+            
             # 计算配置的哈希值，用于检测变化
             config_str = json.dumps(config, sort_keys=True, ensure_ascii=False)
             current_hash = hashlib.md5(config_str.encode()).hexdigest()
@@ -1124,6 +1133,18 @@ class LaunchGUI(QMainWindow):
         set_hotkey_action = QAction("设置热键组合", self)
         set_hotkey_action.triggered.connect(self.set_global_hotkey)
         hotkey_menu.addAction(set_hotkey_action)
+
+        icon_menu = settings_menu.addMenu("图标")
+        icons_enabled = is_launch_icon_enabled(config)
+        icon_toggle_action = QAction("显示启动项图标", self)
+        icon_toggle_action.setCheckable(True)
+        icon_toggle_action.setChecked(icons_enabled)
+        icon_toggle_action.triggered.connect(self.toggle_launch_icons)
+        icon_menu.addAction(icon_toggle_action)
+
+        cache_action = QAction("设置图标缓存大小", self)
+        cache_action.triggered.connect(self.prompt_icon_cache_capacity)
+        icon_menu.addAction(cache_action)
         
         menu.addSeparator()
         
@@ -1235,6 +1256,46 @@ class LaunchGUI(QMainWindow):
             QMessageBox.information(self, "设置已更新", "全局热键设置已更新，需要重启应用才能生效。")
         except Exception as e:
             self.logger.error(f"更新启用全局热键设置失败: {e}")
+
+    def toggle_launch_icons(self, checked):
+        """切换启动项图标显示"""
+        try:
+            config = load_config()
+            set_launch_icon_enabled(config, checked)
+            save_config(config)
+            self.invalidate_config_cache()
+            loader = get_icon_loader()
+            loader.set_enabled(checked)
+            LaunchItem.ICONS_ENABLED = checked
+            self.update_ui_with_config(config)
+            state = "启用" if checked else "禁用"
+            self.logger.info(f"启动项图标已{state}")
+        except Exception as e:
+            self.logger.error(f"切换启动项图标失败: {e}")
+            QMessageBox.critical(self, "操作失败", f"无法更新图标设置: {e}")
+
+    def prompt_icon_cache_capacity(self):
+        """设置图标缓存容量"""
+        try:
+            config = load_config()
+            current_capacity = get_icon_cache_capacity(config)
+            value, ok = QInputDialog.getInt(
+                self,
+                "图标缓存大小",
+                "请输入缓存的最大图标数量（16-1024）：",
+                current_capacity,
+                16,
+                1024,
+                16
+            )
+            if ok:
+                set_icon_cache_capacity(config, value)
+                save_config(config)
+                get_icon_loader().set_cache_capacity(value)
+                self.logger.info(f"图标缓存容量已更新为 {value}")
+        except Exception as e:
+            self.logger.error(f"更新图标缓存容量失败: {e}")
+            QMessageBox.critical(self, "操作失败", f"无法更新图标缓存容量: {e}")
 
     def set_global_hotkey(self):
         """设置全局热键"""
