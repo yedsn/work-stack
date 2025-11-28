@@ -303,6 +303,7 @@ if is_windows():
     # Windows 平台特定导入
     import win32gui
     import win32process
+    import win32con
 elif is_mac():
     # macOS 平台特定导入
     import AppKit
@@ -2674,6 +2675,37 @@ class LaunchGUI(QMainWindow):
             QMessageBox.information(self, "上传成功", message)
         else:
             QMessageBox.warning(self, "上传失败", message)
+
+    def show_normal_and_raise(self):
+        """恢复窗口用于响应外部激活请求。"""
+        try:
+            self.logger.debug("处理激活请求，尝试恢复窗口")
+            if self.isMinimized():
+                self.showNormal()
+            else:
+                self.show()
+
+            # 统一处理焦点与前置
+            self.raise_()
+            self.activateWindow()
+            self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+
+            if self._platform_cache.get('is_windows'):
+                try:
+                    hwnd = int(self.winId())
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    win32gui.SetForegroundWindow(hwnd)
+                except Exception as exc:
+                    self.logger.warning(f"调用 Windows API 激活窗口失败: {exc}")
+            elif self._platform_cache.get('is_mac'):
+                try:
+                    AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                except Exception as exc:
+                    self.logger.warning(f"调用 macOS API 激活窗口失败: {exc}")
+
+            QTimer.singleShot(50, self.focus_search_input)
+        except Exception as exc:
+            self.logger.error(f"处理激活请求时出错: {exc}")
 
     def showEvent(self, event):
         """重写显示事件，用于在显示窗口时执行操作"""

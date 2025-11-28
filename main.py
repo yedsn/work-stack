@@ -8,6 +8,7 @@ from PyQt5.QtGui import QIcon, QFont, QPixmap, QKeySequence, QCursor
 from PyQt5.QtCore import QSize, Qt, QTimer
 from gui.main_window import LaunchGUI
 from utils.logger import get_logger
+from utils.single_instance import SingleInstanceManager
 
 # 获取日志记录器
 logger = get_logger("launcher")
@@ -20,10 +21,39 @@ except ImportError:
     has_keyboard_lib = False
     logger.warning("未能导入keyboard库，全局热键功能将不可用")
 
+_singleton_window = None
+
+
+def bring_existing_window_to_front():
+    """Handle activation from a duplicate process."""
+    global _singleton_window
+    app = QApplication.instance()
+    if not app:
+        logger.warning("收到激活请求但应用尚未初始化")
+        return
+    if not _singleton_window:
+        logger.warning("收到激活请求但主窗口未就绪")
+        return
+    logger.info("收到激活请求，恢复窗口")
+    QTimer.singleShot(0, _singleton_window.show_normal_and_raise)
+
+
 def main():
+    global _singleton_window
     # 记录应用启动
     logger.info("应用启动器开始启动")
-    
+    instance_manager = SingleInstanceManager()
+    has_lock = instance_manager.acquire(bring_existing_window_to_front)
+    if not has_lock:
+        logger.info("检测到已有运行实例，尝试激活已启动的窗口")
+        if instance_manager.activate_existing():
+            logger.info("已请求激活现有窗口，退出重复进程")
+            return 0
+        logger.error("已存在实例但无法激活，退出以避免多开")
+        return 1
+
+    hotkey_manager = None
+
     # Windows 高 DPI 支持设置
     if sys.platform == 'win32':
         # 确保在高 DPI 显示器上文字不会太小
@@ -121,6 +151,7 @@ def main():
         logger.debug("显示关于对话框")
     
     window = LaunchGUI()
+    _singleton_window = window
     logger.info("主窗口已创建")
     
     # 添加键盘快捷键
@@ -296,19 +327,21 @@ def main():
 
     # 设置应用退出时的清理函数
     def cleanup_on_exit():
+        global _singleton_window
         try:
             from utils.config_manager import flush_config
             # 刷新所有未保存的配置
             flush_config()
-            
+
             # 清理主窗口资源
-            if 'window' in locals():
+            if window:
                 window.cleanup_resources()
-            
+
             # 清理热键管理器
-            if 'hotkey_manager' in locals() and hotkey_manager:
+            if hotkey_manager:
                 hotkey_manager.cleanup()
-                
+
+            _singleton_window = None
             logger.info("应用退出清理完成")
         except Exception as e:
             logger.error(f"应用退出清理失败: {e}")
@@ -322,6 +355,8 @@ def main():
     finally:
         # 确保清理
         cleanup_on_exit()
+        if has_lock:
+            instance_manager.release()
     
     logger.info(f"应用程序退出，退出代码: {exit_code}")
     return exit_code
