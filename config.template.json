@@ -25,5 +25,7 @@
       "device_window_sizes",
       "sync_settings"
     ]
-  }
+  },
+  "enable_hotkey": true,
+  "toggle_hotkey": "alt+w"
 }

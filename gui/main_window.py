@@ -17,12 +17,22 @@ from PyQt5.QtCore import Qt, QPoint, QTimer, QThread, pyqtSignal, QObject, QRegE
 from PyQt5.QtGui import (QCursor, QIcon, QColor, QKeySequence, QMovie, QFont)
 from PyQt5.QtCore import QEvent
 from gui.category_tab import CategoryTab
-from utils.config_manager import (load_config, save_config, flush_config, 
-                                  get_available_tags, get_tag_filter_state, 
-                                  update_tag_filter_state, filter_programs_by_tags,
-                                  add_available_tag, is_launch_icon_enabled,
-                                  set_launch_icon_enabled, get_icon_cache_capacity,
-                                  set_icon_cache_capacity)
+from utils.config_manager import (
+    load_config,
+    save_config,
+    flush_config,
+    get_available_tags,
+    get_tag_filter_state,
+    update_tag_filter_state,
+    filter_programs_by_tags,
+    add_available_tag,
+    is_launch_icon_enabled,
+    set_launch_icon_enabled,
+    get_icon_cache_capacity,
+    set_icon_cache_capacity,
+    ensure_hotkey_defaults,
+    DEFAULT_TOGGLE_HOTKEY,
+)
 from gui.launch_item import LaunchItem
 from utils.logger import get_logger
 from utils.platform_settings import (get_platform_style, get_platform_setting, 
@@ -1249,13 +1259,29 @@ class LaunchGUI(QMainWindow):
     def toggle_enable_hotkey(self, checked):
         """切换启用全局热键的设置"""
         try:
-            config = load_config()
+            config = ensure_hotkey_defaults(load_config())
             config["enable_hotkey"] = checked
             save_config(config)
             self.logger.debug(f"已更新启用全局热键设置: {checked}")
-            
-            # 显示提示信息，需要重启应用
-            QMessageBox.information(self, "设置已更新", "全局热键设置已更新，需要重启应用才能生效。")
+
+            message = f"全局热键已{'启用' if checked else '禁用'}。"
+            if self.hotkey_manager:
+                if checked:
+                    desired_hotkey = config.get("toggle_hotkey", DEFAULT_TOGGLE_HOTKEY)
+                    success = self.hotkey_manager.register_hotkey(desired_hotkey)
+                    if success:
+                        self.logger.info(f"全局热键已启用: {desired_hotkey}")
+                    else:
+                        self.logger.warning("全局热键注册失败，请确认辅助功能权限或是否存在冲突应用")
+                        QMessageBox.warning(self, "注册失败", "已保存设置，但无法注册全局热键，请检查系统权限。")
+                        return
+                else:
+                    self.hotkey_manager.unregister_hotkey()
+                    self.logger.info("全局热键已禁用")
+            else:
+                message += " 当前平台未提供全局热键管理器。"
+
+            QMessageBox.information(self, "设置已更新", message)
         except Exception as e:
             self.logger.error(f"更新启用全局热键设置失败: {e}")
 
@@ -1302,28 +1328,38 @@ class LaunchGUI(QMainWindow):
     def set_global_hotkey(self):
         """设置全局热键"""
         try:
-            config = load_config()
-            current_hotkey = config.get("toggle_hotkey", "ctrl+shift+z")
-            
+            config = ensure_hotkey_defaults(load_config())
+            current_hotkey = config.get("toggle_hotkey", DEFAULT_TOGGLE_HOTKEY)
+
             # 使用输入对话框获取新的热键设置
             new_hotkey, ok = QInputDialog.getText(
-                self, "设置全局热键", 
-                "请输入新的全局热键组合\n格式例如：ctrl+shift+z", 
-                QLineEdit.Normal, 
+                self, "设置全局热键",
+                "请输入新的全局热键组合\n格式例如：alt+w",
+                QLineEdit.Normal,
                 current_hotkey
             )
-            
+
             if ok and new_hotkey:
                 # 检查热键格式是否有效
-                if "+" in new_hotkey:
-                    config["toggle_hotkey"] = new_hotkey
+                normalized = new_hotkey.strip().lower()
+                if "+" in normalized:
+                    config["toggle_hotkey"] = normalized
                     save_config(config)
-                    self.logger.debug(f"已更新全局热键设置: {new_hotkey}")
-                    
-                    # 显示提示信息，需要重启应用
-                    QMessageBox.information(self, "设置已更新", "全局热键设置已更新，需要重启应用才能生效。")
+                    self.logger.debug(f"已更新全局热键设置: {normalized}")
+
+                    message = "全局热键设置已更新。"
+                    if config.get("enable_hotkey", True) and self.hotkey_manager:
+                        success = self.hotkey_manager.register_hotkey(normalized)
+                        if success:
+                            message = "全局热键设置已更新并立即生效。"
+                            self.logger.info("全局热键已重新注册")
+                        else:
+                            message = "已保存新的全局热键，但注册失败，请确认系统权限或热键是否被其它程序占用。"
+                            self.logger.warning("全局热键注册失败，请检查系统权限或冲突程序")
+
+                    QMessageBox.information(self, "设置已更新", message)
                 else:
-                    QMessageBox.warning(self, "格式错误", "热键格式无效，请使用“+”号连接修饰键和主键，例如：ctrl+shift+z")
+                    QMessageBox.warning(self, "格式错误", "热键格式无效，请使用“+”连接修饰键和主键，例如：alt+w")
         except Exception as e:
             self.logger.error(f"设置全局热键失败: {e}")
 

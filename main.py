@@ -10,17 +10,14 @@ from gui.main_window import LaunchGUI
 from utils.logger import get_logger
 from utils.single_instance import SingleInstanceManager
 from utils.path_utils import resource_path
+from utils.config_manager import (
+    load_config,
+    ensure_hotkey_defaults,
+    DEFAULT_TOGGLE_HOTKEY,
+)
 
 # 获取日志记录器
 logger = get_logger("launcher")
-
-# 导入全局快捷键库
-try:
-    import keyboard
-    has_keyboard_lib = True
-except ImportError:
-    has_keyboard_lib = False
-    logger.warning("未能导入keyboard库，全局热键功能将不可用")
 
 _singleton_window = None
 
@@ -160,84 +157,92 @@ def main():
     hide_shortcut = QShortcut(QKeySequence("Esc"), window)
     hide_shortcut.activated.connect(window.hide_and_clear_search)
     
+    # 构建为热键切换准备的设置对象
+    def build_hotkey_settings():
+        class Settings:
+            pass
+
+        settings = Settings()
+
+        def show_window_from_hotkey():
+            try:
+                if hasattr(window, "show_normal_and_raise"):
+                    window.show_normal_and_raise()
+                else:
+                    window.show()
+                    window.raise_()
+                    window.activateWindow()
+                logger.debug("通过全局热键显示窗口")
+            except Exception as err:
+                logger.error(f"显示窗口时出错: {err}")
+
+        def hide_window_from_hotkey():
+            try:
+                if hasattr(window, "hide_and_clear_search"):
+                    window.hide_and_clear_search()
+                else:
+                    window.hide()
+                logger.debug("通过全局热键隐藏窗口")
+            except Exception as err:
+                logger.error(f"隐藏窗口时出错: {err}")
+
+        settings.show_window = show_window_from_hotkey
+        settings.minimize_to_tray = hide_window_from_hotkey
+        return settings
+
     # 设置全局快捷键
     if sys.platform == 'win32':
         try:
-            # 导入 Windows 平台的热键管理器
             from gui.hotkey_manager_win import HotkeyManagerWin
-            
-            from utils.config_manager import load_config
-            config = load_config()
-            
-            # 创建一个简单的设置对象
-            class Settings:
-                pass
-                
-            settings = Settings()
-            
-            # 设置热键
-            if not hasattr(settings, 'toggle_hotkey'):
-                # 从配置文件中读取热键设置
-                settings.toggle_hotkey = config.get('toggle_hotkey', 'ctrl+shift+z')
-                
-            def minimize_to_tray():
-                try:
-                    window.withdraw()
-                    logger.debug("通过全局热键隐藏窗口")
-                except Exception as e:
-                    logger.error(f"隐藏窗口时出错: {e}")
-                    
-            # 将这些方法添加到settings对象
-            settings.show_window = window.show
-            settings.minimize_to_tray = minimize_to_tray
-                
-            # 检查是否启用全局热键
-            enable_hotkey = config.get('enable_hotkey', True)
-            
+
+            config = ensure_hotkey_defaults(load_config(), persist=True)
+
+            settings = build_hotkey_settings()
+            settings.toggle_hotkey = config.get("toggle_hotkey", DEFAULT_TOGGLE_HOTKEY)
+
+            enable_hotkey = config.get("enable_hotkey", True)
+            hotkey_manager = HotkeyManagerWin(window, settings)
+            window.set_hotkey_manager(hotkey_manager)
+
             if enable_hotkey:
-                # 创建热键管理器实例
-                hotkey_manager = HotkeyManagerWin(window, settings)
-                
-                # 设置窗口对热键管理器的引用
-                window.set_hotkey_manager(hotkey_manager)
-                
-                # 注册热键
-                hotkey_manager.register_hotkey()
+                hotkey_manager.register_hotkey(settings.toggle_hotkey)
                 logger.info(f"已注册全局热键: {settings.toggle_hotkey}")
             else:
                 logger.info("全局热键已禁用")
-            
-            # 确保应用退出时清理热键
-            def cleanup_hotkeys():
-                try:
-                    hotkey_manager.unregister_hotkey()
-                    logger.debug("已清理全局热键")
-                except Exception as e:
-                    logger.error(f"清理全局热键时出错: {e}")
-            
-            app.aboutToQuit.connect(cleanup_hotkeys)
-            
+
         except Exception as e:
             logger.error(f"初始化热键管理器失败: {e}")
-            # 如果热键管理器初始化失败，使用普通快捷键
             show_shortcut = QShortcut(QKeySequence("alt+`"), window)
             show_shortcut.activated.connect(lambda: (window.show(), window.activateWindow()))
             logger.debug("已设置应用内快捷键 (热键管理器初始化失败)")
     elif sys.platform == 'darwin':
         try:
-            # 导入 macOS 平台的热键管理器
             from gui.hotkey_manager_mac import HotkeyManagerMac
-            
-            # TODO: 实现 macOS 平台的热键注册
-            logger.warning("macOS 平台的全局热键功能尚未实现")
-            
-            # 使用普通快捷键
+
+            config = ensure_hotkey_defaults(load_config(), persist=True)
+            settings = build_hotkey_settings()
+            settings.toggle_hotkey = config.get("toggle_hotkey", DEFAULT_TOGGLE_HOTKEY)
+            enable_hotkey = config.get("enable_hotkey", True)
+
+            hotkey_manager = HotkeyManagerMac(window, settings)
+            window.set_hotkey_manager(hotkey_manager)
+
+            if enable_hotkey:
+                success = hotkey_manager.register_hotkey(settings.toggle_hotkey)
+                if success:
+                    logger.info(f"已注册 macOS 全局热键: {settings.toggle_hotkey}")
+                else:
+                    logger.warning("macOS 全局热键注册失败，启用应用内快捷键作为回退")
+                    show_shortcut = QShortcut(QKeySequence("alt+`"), window)
+                    show_shortcut.activated.connect(lambda: (window.show(), window.activateWindow()))
+            else:
+                logger.info("macOS 全局热键已禁用")
+
+        except Exception as e:
+            logger.error(f"初始化 macOS 热键管理器失败: {e}")
             show_shortcut = QShortcut(QKeySequence("alt+`"), window)
             show_shortcut.activated.connect(lambda: (window.show(), window.activateWindow()))
             logger.debug("已设置应用内快捷键 (macOS)")
-            
-        except Exception as e:
-            logger.error(f"初始化 macOS 热键管理器失败: {e}")
     else:  # Linux 平台
         try:
             # 导入 Linux 平台的热键管理器
@@ -254,6 +259,16 @@ def main():
         except Exception as e:
             logger.error(f"初始化 Linux 热键管理器失败: {e}")
     
+    if hotkey_manager:
+        def cleanup_hotkeys():
+            try:
+                hotkey_manager.unregister_hotkey()
+                logger.debug("已清理全局热键")
+            except Exception as e:
+                logger.error(f"清理全局热键时出错: {e}")
+
+        app.aboutToQuit.connect(cleanup_hotkeys)
+
     # 创建系统托盘图标
     icon = QIcon(icon_path) if os.path.exists(icon_path) else app.windowIcon()
     tray_icon = QSystemTrayIcon(icon, app)

@@ -39,7 +39,7 @@ class BaseHotkeyManager(ABC):
         注册全局热键
         
         Args:
-            hotkey_str: 热键字符串，如 'ctrl+shift+z'
+            hotkey_str: 热键字符串，如 'alt+w'
             callback: 热键触发回调函数，默认使用 toggle_window
             
         Returns:
@@ -131,7 +131,7 @@ class BaseHotkeyManager(ABC):
         解析热键字符串
         
         Args:
-            hotkey_str: 热键字符串，如 'ctrl+shift+z'
+            hotkey_str: 热键字符串，如 'alt+w'
             
         Returns:
             dict: 解析后的热键信息，包含修饰键和主键

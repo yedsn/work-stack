@@ -24,6 +24,8 @@ _save_timer = None
 _save_lock = threading.Lock()
 SAVE_DELAY = 1.0  # 延迟保存时间（秒）
 DEFAULT_ICON_CACHE_CAPACITY = 128
+DEFAULT_TOGGLE_HOTKEY = "alt+w"
+DEFAULT_ENABLE_HOTKEY = True
 
 def load_config() -> Dict[str, Any]:
     """加载配置文件（使用缓存）"""
@@ -119,6 +121,34 @@ def save_config(config: Dict[str, Any], immediate: bool = False) -> bool:
             _save_timer.start()
             
         return True
+
+
+def ensure_hotkey_defaults(config: Dict[str, Any], persist: bool = False) -> Dict[str, Any]:
+    """
+    确保配置中包含全局热键的默认值。
+
+    Args:
+        config: 当前配置
+        persist: 若设置为 True，则在写入默认值后立刻保存
+
+    Returns:
+        更新后的配置对象
+    """
+    updated = False
+
+    toggle_hotkey = config.get("toggle_hotkey")
+    if not toggle_hotkey:
+        config["toggle_hotkey"] = DEFAULT_TOGGLE_HOTKEY
+        updated = True
+
+    if "enable_hotkey" not in config:
+        config["enable_hotkey"] = DEFAULT_ENABLE_HOTKEY
+        updated = True
+
+    if updated and persist:
+        save_config(config)
+
+    return config
 
 def flush_config():
     """强制刷新所有待保存的配置"""

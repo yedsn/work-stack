@@ -2,192 +2,208 @@
 # -*- coding: utf-8 -*-
 
 """
-Windows平台的全局热键管理器
-使用keyboard库注册全局快捷键
+Windows 平台的全局热键管理器。
+使用 RegisterHotKey + Qt 原生事件过滤器，避免在多桌面/虚拟桌面切换时丢失 keyboard 库的钩子。
 """
 
-import sys
-import threading
-import time
+import ctypes
+from ctypes import wintypes
+import itertools
 import traceback
-import logging
-import keyboard
-from tkinter import messagebox
-from typing import Callable, Optional
-from utils.logger import get_logger
+from typing import Callable, Optional, Tuple
+
+from PyQt5.QtCore import QAbstractNativeEventFilter, QTimer
+from PyQt5.QtWidgets import QApplication
+
 from gui.hotkey_manager_base import BaseHotkeyManager
+from utils.config_manager import DEFAULT_TOGGLE_HOTKEY
+from utils.logger import get_logger
+
+user32 = ctypes.windll.user32
+WM_HOTKEY = 0x0312
+
+MODIFIERS = {
+    "alt": 0x0001,
+    "ctrl": 0x0002,
+    "shift": 0x0004,
+    "meta": 0x0008,
+    "win": 0x0008,
+}
+
+SPECIAL_KEYS = {
+    "enter": 0x0D,
+    "return": 0x0D,
+    "esc": 0x1B,
+    "escape": 0x1B,
+    "space": 0x20,
+    "tab": 0x09,
+    "backspace": 0x08,
+    "delete": 0x2E,
+    "home": 0x24,
+    "end": 0x23,
+    "pageup": 0x21,
+    "pagedown": 0x22,
+    "insert": 0x2D,
+    "up": 0x26,
+    "down": 0x28,
+    "left": 0x25,
+    "right": 0x27,
+}
+
+
+class _WinHotkeyEventFilter(QAbstractNativeEventFilter):
+    """集中处理 WM_HOTKEY 消息并回调主线程。"""
+
+    def __init__(self, logger):
+        super().__init__()
+        self.logger = logger
+        self._callbacks = {}
+
+    def register_callback(self, hotkey_id: int, callback: Callable):
+        self._callbacks[hotkey_id] = callback
+
+    def unregister_callback(self, hotkey_id: int):
+        self._callbacks.pop(hotkey_id, None)
+
+    def nativeEventFilter(self, event_type, message):
+        if event_type != "windows_generic_MSG":
+            return False, 0
+        msg = wintypes.MSG.from_address(int(message))
+        if msg.message == WM_HOTKEY:
+            callback = self._callbacks.get(msg.wParam)
+            if callback:
+                QTimer.singleShot(0, callback)
+            return True, 0
+        return False, 0
+
 
 class HotkeyManagerWin(BaseHotkeyManager):
-    """Windows平台的全局热键管理器"""
-    
+    """Windows 平台的全局热键管理器。"""
+
+    _event_filter: Optional[_WinHotkeyEventFilter] = None
+    _hotkey_ids = itertools.count(1)
+
     def __init__(self, window, settings):
-        """初始化热键管理器"""
         super().__init__(window, settings)
-        self.logger.debug("初始化Windows热键管理器")
-        
-        self.hotkey_registered = False  # 记录热键是否成功注册
-        self.hotkey_retry_count = 0  # 热键重试次数
-        self.hotkey_pressed = False  # 热键是否被按下
-        
-        # 创建一个定时器，在主线程中定期检查热键状态
-        from PyQt5.QtCore import QTimer
-        self.check_timer = QTimer()
-        self.check_timer.timeout.connect(self._check_hotkey_pressed)
-        self.check_timer.start(200)  # 优化：增加到200ms以减少CPU使用
-        
-        # 暂停/恢复状态
-        self.checking_paused = False
-        
+        self.logger.debug("初始化 Windows 热键管理器")
+        self.hotkey_id: Optional[int] = None
+        self._ensure_event_filter()
+
+    @classmethod
+    def _ensure_event_filter(cls):
+        if cls._event_filter is None:
+            app = QApplication.instance()
+            if app is None:
+                raise RuntimeError("QApplication 尚未初始化，无法注册全局热键")
+            cls._event_filter = _WinHotkeyEventFilter(get_logger())
+            app.installNativeEventFilter(cls._event_filter)
+
     def register_hotkey(self, hotkey_str: str = None, callback: Callable = None) -> bool:
-        """注册全局快捷键"""
+        """注册全局快捷键。"""
         try:
-            # 使用传入的参数或从settings获取默认值
             if hotkey_str is None:
-                hotkey_str = getattr(self.settings, 'toggle_hotkey', 'ctrl+shift+z')
+                hotkey_str = getattr(self.settings, 'toggle_hotkey', DEFAULT_TOGGLE_HOTKEY)
+            hotkey_str = hotkey_str.strip().lower()
             if callback is None:
                 callback = self.toggle_window
-                
-            # 先清除已有的快捷键绑定
-            keyboard.unhook_all()
-            self.logger.info("已清除之前的热键绑定")
-            
-            def hotkey_callback():
-                try:
-                    # 使用 PyQt5 的 QApplication.postEvent 在主线程中处理
-                    # 这里我们简单地设置一个标志，在主线程中定期检查这个标志
-                    self.hotkey_pressed = True
-                    self.logger.debug('热键已按下')
-                except Exception as e:
-                    self.logger.error(f"热键回调函数出错: {str(e)}")
-                    self.logger.error(f"错误追踪:\n{traceback.format_exc()}")
 
-            # 注册新的快捷键
-            keyboard.add_hotkey(
-                hotkey_str,
-                hotkey_callback,
-                suppress=True,
-                trigger_on_release=True
-            )
-            self.hotkey_registered = True
-            self.hotkey_retry_count = 0
-            self.registered_hotkeys[hotkey_str] = callback
+            modifiers, vk_code = self._parse_hotkey(hotkey_str)
+            if vk_code is None:
+                self.logger.error(f"无法解析热键: {hotkey_str}")
+                return False
+
+            self.unregister_hotkey()
+
+            hotkey_id = next(self._hotkey_ids)
+            result = user32.RegisterHotKey(None, hotkey_id, modifiers, vk_code)
+            if not result:
+                err = ctypes.GetLastError()
+                self.logger.error(f"注册全局热键失败 (code={err}): {hotkey_str}")
+                return False
+
+            self.hotkey_id = hotkey_id
+            self.registered_hotkeys = {hotkey_str: callback}
+            if hasattr(self.settings, 'toggle_hotkey'):
+                self.settings.toggle_hotkey = hotkey_str
+            else:
+                setattr(self.settings, 'toggle_hotkey', hotkey_str)
+
+            if self._event_filter:
+                self._event_filter.register_callback(hotkey_id, callback)
+
+            self.is_enabled = True
             self.logger.info(f"全局热键注册成功: {hotkey_str}")
             return True
-            
-        except Exception as e:
-            error_msg = f"注册热键失败: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.error(f"错误追踪:\n{traceback.format_exc()}")
-            self.retry_register_hotkey()
+
+        except Exception as exc:
+            self.logger.error(f"注册热键失败: {exc}")
+            self.logger.error(traceback.format_exc())
             return False
-    
-    def retry_register_hotkey(self):
-        """重试注册快捷键"""
-        MAX_RETRY_COUNT = 5  # 最大重试次数
-        try:
-            if self.hotkey_retry_count < MAX_RETRY_COUNT:
-                self.hotkey_retry_count += 1
-                retry_delay = min(1000 * (2 ** self.hotkey_retry_count), 30000)  # 指数退避，最大30秒
-                self.logger.info(f"尝试重新注册热键 (第 {self.hotkey_retry_count} 次尝试) 将在 {retry_delay}ms 后进行")
-                
-                # 使用 QTimer.singleShot 在一定时间后重试
-                from PyQt5.QtCore import QTimer
-                QTimer.singleShot(retry_delay, self.register_hotkey)
-            else:
-                self.logger.error("已达到热键注册最大重试次数")
-                self.hotkey_retry_count = 0  # 重置重试计数
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.critical(None, "错误", "快捷键注册失败，请尝试重启应用")
-        except Exception as e:
-            self.logger.error(f"重试注册热键时出错: {str(e)}")
-            self.logger.error(f"错误追踪:\n{traceback.format_exc()}")
-    
-    def _check_hotkey_pressed(self):
-        """在主线程中检查热键是否被按下"""
-        # 如果检查被暂停，跳过处理
-        if self.checking_paused:
-            return
-            
-        if self.hotkey_pressed:
-            self._handle_hotkey_action()
-            self.hotkey_pressed = False
-    
-    def _handle_hotkey_action(self):
-        """处理快捷键动作"""
-        try:
-            # 使用 PyQt5 的方式检查窗口状态
-            is_visible = self.window.isVisible()
-            self.logger.debug(f"窗口可见状态: {is_visible}")
-            
-            if not is_visible:
-                self.logger.info("热键按下: 显示窗口")
-                self.settings.show_window()
-            else:
-                self.logger.info("热键按下: 最小化窗口")
-                self.settings.minimize_to_tray()
-        except Exception as e:
-            self.logger.error(f"处理热键动作时出错: {str(e)}")
-    
-    # 这些方法现在由settings对象提供，不再需要在这里实现
-    
+
+    def _parse_hotkey(self, hotkey_str: str) -> Tuple[int, Optional[int]]:
+        parsed = self.parse_hotkey_string(hotkey_str)
+        modifiers = 0
+        if parsed['ctrl']:
+            modifiers |= MODIFIERS['ctrl']
+        if parsed['alt']:
+            modifiers |= MODIFIERS['alt']
+        if parsed['shift']:
+            modifiers |= MODIFIERS['shift']
+        if parsed['meta']:
+            modifiers |= MODIFIERS['win']
+
+        vk_code = self._key_to_vk(parsed.get('key'))
+        return modifiers, vk_code
+
+    def _key_to_vk(self, key: Optional[str]) -> Optional[int]:
+        if not key:
+            return None
+        normalized = key.strip().lower()
+        if normalized in SPECIAL_KEYS:
+            return SPECIAL_KEYS[normalized]
+        if normalized.startswith('f') and normalized[1:].isdigit():
+            index = int(normalized[1:])
+            if 1 <= index <= 24:
+                return 0x6F + index  # F1=0x70
+        if len(normalized) == 1:
+            return ord(normalized.upper())
+        self.logger.warning(f"不支持的主键: {key}")
+        return None
+
     def pause_checking(self):
-        """暂停热键检测"""
-        self.checking_paused = True
-        self.logger.debug("热键检测已暂停")
-    
+        """兼容旧接口，无操作。"""
+        self.logger.debug("暂停热键检测（占位，无实际操作）")
+
     def resume_checking(self):
-        """恢复热键检测"""
-        self.checking_paused = False
-        self.logger.debug("热键检测已恢复")
+        """兼容旧接口，无操作。"""
+        self.logger.debug("恢复热键检测（占位，无实际操作）")
 
     def unregister_hotkey(self, hotkey_str: Optional[str] = None) -> bool:
-        """注销全局快捷键"""
+        """注销全局快捷键。"""
         try:
-            if hotkey_str:
-                # 注销特定热键
-                if hotkey_str in self.registered_hotkeys:
-                    del self.registered_hotkeys[hotkey_str]
-                    # keyboard库没有提供单独注销特定热键的接口，需要清除所有后重新注册
-                    keyboard.unhook_all()
-                    self.hotkey_registered = False
-                    # 如果还有其他热键，重新注册它们
-                    for remaining_hotkey, callback in self.registered_hotkeys.items():
-                        self.register_hotkey(remaining_hotkey, callback)
-                    self.logger.info(f"热键 {hotkey_str} 已注销")
-                else:
-                    self.logger.warning(f"热键 {hotkey_str} 未注册，无法注销")
-            else:
-                # 注销所有热键
-                keyboard.unhook_all()
-                self.hotkey_registered = False
-                self.registered_hotkeys.clear()
-                self.logger.info("所有全局热键已注销")
+            if self.hotkey_id is not None:
+                if self._event_filter:
+                    self._event_filter.unregister_callback(self.hotkey_id)
+                user32.UnregisterHotKey(None, self.hotkey_id)
+                self.logger.info("已注销全局热键")
+                self.hotkey_id = None
+            self.registered_hotkeys.clear()
+            self.is_enabled = False
             return True
-        except Exception as e:
-            self.logger.error(f"注销热键时出错: {str(e)}")
+        except Exception as exc:
+            self.logger.error(f"注销热键时出错: {exc}")
             return False
-    
+
     def cleanup(self):
-        """清理资源"""
+        """清理资源。"""
         try:
             self.unregister_hotkey()
-            # 停止定时器
-            if hasattr(self, 'check_timer') and self.check_timer:
-                self.check_timer.stop()
-                self.check_timer.deleteLater()
-                self.check_timer = None
-            
-            # 清理状态
-            self.hotkey_pressed = False
-            
-            self.logger.info("已清理Windows热键管理器资源")
-        except Exception as e:
-            self.logger.error(f"清理热键管理器资源失败: {e}")
-    
+            self.logger.info("已清理 Windows 热键管理器资源")
+        except Exception as exc:
+            self.logger.error(f"清理热键管理器资源失败: {exc}")
+
     def __del__(self):
-        """析构函数，确保清理所有热键"""
         try:
             self.cleanup()
-        except Exception as e:
-            # 在析构函数中不应该引发异常
+        except Exception:
             pass
