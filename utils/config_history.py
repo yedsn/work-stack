@@ -10,10 +10,24 @@ from datetime import datetime
 from utils.logger import get_logger
 from utils.config_manager import load_config, save_config, CONFIG_PATH
 from utils.config_cleanup import ConfigHistoryCleanup
+from utils.path_utils import (
+    get_user_history_dir,
+    get_legacy_history_dir,
+    migrate_legacy_directory,
+)
 
-# 获取项目根目录
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "."))
-HISTORY_DIR = os.path.join(PROJECT_ROOT, "config_history")
+_USER_HISTORY_DIR = get_user_history_dir()
+HISTORY_DIR = str(_USER_HISTORY_DIR)
+_LEGACY_HISTORY_DIR = get_legacy_history_dir()
+
+
+def _initialize_history_storage(logger):
+    migrated = migrate_legacy_directory(_LEGACY_HISTORY_DIR, _USER_HISTORY_DIR)
+    if migrated:
+        logger.info(f"已迁移配置历史到 {HISTORY_DIR}，备份路径: {migrated}")
+
+
+_initialize_history_storage(get_logger("config_history_bootstrap"))
 
 class ConfigHistoryManager:
     """配置历史管理器，用于记录和管理配置文件的变更历史"""

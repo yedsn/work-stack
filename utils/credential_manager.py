@@ -8,14 +8,22 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from utils.logger import get_logger
+from utils.path_utils import (
+    get_user_credentials_path,
+    get_legacy_credentials_path,
+    migrate_legacy_file,
+)
 
 logger = get_logger(__name__)
+_USER_CREDENTIALS_PATH = get_user_credentials_path()
+_LEGACY_CREDENTIALS_PATH = get_legacy_credentials_path()
+migrate_legacy_file(_LEGACY_CREDENTIALS_PATH, _USER_CREDENTIALS_PATH)
 
 class CredentialManager:
     """安全凭证管理器 - 加密存储敏感信息"""
     
     def __init__(self, config_path: str = None):
-        self.config_path = config_path or os.path.join(os.path.dirname(__file__), '..', 'credentials.enc')
+        self.config_path = config_path or str(_USER_CREDENTIALS_PATH)
         self.key = None
         
     def _derive_key(self, password: str, salt: bytes = None) -> bytes:

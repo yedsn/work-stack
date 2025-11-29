@@ -6,6 +6,7 @@ import json
 import glob
 from datetime import datetime, timedelta
 from utils.logger import get_logger
+from utils.path_utils import get_user_history_dir
 
 logger = get_logger(__name__)
 
@@ -16,9 +17,7 @@ class ConfigHistoryCleanup:
         if config_history_dir:
             self.config_history_dir = config_history_dir
         else:
-            # 默认配置历史目录
-            project_root = os.path.dirname(os.path.dirname(__file__))
-            self.config_history_dir = os.path.join(project_root, 'config_history')
+            self.config_history_dir = str(get_user_history_dir())
     
     def cleanup_old_files(self, keep_count: int = 20, max_age_days: int = 30) -> int:
         """

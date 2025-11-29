@@ -27,6 +27,8 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+from utils.path_utils import get_user_config_path
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 MAIN_SCRIPT = PROJECT_ROOT / "main.py"
 DIST_DIR = PROJECT_ROOT / "dist"
@@ -243,7 +245,8 @@ def build_exe() -> bool:
 
     print(f"[OK] 打包完成: {output_path}")
     print(
-        "提示: 将 `config.template.json` 复制为 `config.json` 后再运行，以免包含个人路径或凭据。"
+        "提示: 将 `config.template.json` 复制为 "
+        f"`{get_user_config_path()}` 后再运行，以免包含个人路径或凭据。"
     )
     return True
 

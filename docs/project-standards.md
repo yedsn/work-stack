@@ -14,7 +14,7 @@ work-stack/
 ├── cli.py                      # 命令行接口
 ├── launcher.py                 # 启动器模块
 ├── __main__.py                 # Python模块入口
-├── config.json                 # 主配置文件
+├── config.template.json        # 配置模板，实际配置存放在用户目录
 ├── requirements.txt            # Python依赖文件
 ├── build_exe.py               # 可执行文件构建脚本
 ├── launch.sh                   # 跨平台启动脚本
@@ -54,7 +54,7 @@ work-stack/
 │   └── *                      # 其他资源文件
 ├── logs/                       # 日志文件目录（运行时生成）
 │   └── app.log                # 应用日志
-└── config_history/             # 配置历史目录（运行时生成）
+└── （用户目录）/config_history/  # 配置历史目录（运行时生成）
     └── *.json                 # 配置备份文件
 ```
 
@@ -66,7 +66,7 @@ work-stack/
 4. **tests包**：测试文件，与源码结构对应
 5. **docs目录**：项目文档，包括规范、API文档等
 6. **resources目录**：静态资源文件
-7. **运行时目录**：logs和config_history在运行时自动创建
+7. **运行时目录**：`logs/` 位于项目根目录，`config_history/` 与 `config.json` 一样位于用户数据目录并在运行时自动创建
 
 ## 代码规范
 

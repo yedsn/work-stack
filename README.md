@@ -33,7 +33,7 @@ pip install -r requirements.txt
 ### Windows EXE 打包
 1. 安装 PyInstaller：`pip install pyinstaller`
 2. 运行 `python build_exe.py`（脚本会校验 `main.py`、`resources/`、`config.template.json` 等必需资源并写入版本信息）
-3. 完成后在 `dist/应用启动器/应用启动器.exe` 找到生成的可执行文件，分享前请复制 `config.template.json` 为 `config.json` 并按需定制内容以避免泄露个人配置
+3. 完成后在 `dist/应用启动器/应用启动器.exe` 找到生成的可执行文件，分享前请将 `config.template.json` 复制到用户配置目录（Windows `%APPDATA%\Work Stack\config.json`、macOS `~/Library/Application Support/Work Stack/config.json`、Linux `${XDG_CONFIG_HOME:-~/.config}/work-stack/config.json`）并按需定制内容以避免泄露个人配置
 
 > 故障排查：如果提示缺少 PyInstaller 或资源文件，按提示安装依赖或补齐文件后重新运行；打包日志会打印在终端，可附加到评审记录。
 
@@ -78,6 +78,16 @@ python cli.py [参数]
 ## 许可证
 
 MIT
+
+## 配置存储路径
+
+应用会把配置、凭证以及配置历史存放到每个用户的独立目录，确保即使安装在不可写的系统目录或通过 PyInstaller 打包后仍能保存设置：
+
+- Windows：`%APPDATA%\Work Stack\config.json`
+- macOS：`~/Library/Application Support/Work Stack/config.json`
+- Linux：`${XDG_CONFIG_HOME:-~/.config}/work-stack/config.json`
+
+`credentials.enc` 和 `config_history/` 也位于上述目录。升级到该版本后，如果项目根目录存在旧版配置或历史，应用会在首次启动时自动迁移到新的用户目录并留下带时间戳的备份。
 
 ## 平台设置功能
 

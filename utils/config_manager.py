@@ -7,13 +7,30 @@ import time
 import threading
 from typing import Dict, Any, Optional, List
 from utils.logger import get_logger
+from utils.path_utils import (
+    get_project_root,
+    get_user_config_path,
+    get_legacy_config_path,
+    migrate_legacy_file,
+)
 
 # 获取日志记录器
 logger = get_logger("config_manager")
 
 # 获取项目根目录
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "."))
-CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
+PROJECT_ROOT = str(get_project_root())
+_USER_CONFIG_PATH = get_user_config_path()
+CONFIG_PATH = str(_USER_CONFIG_PATH)
+_LEGACY_CONFIG_PATH = get_legacy_config_path()
+
+
+def _initialize_config_storage():
+    migrated = migrate_legacy_file(_LEGACY_CONFIG_PATH, _USER_CONFIG_PATH)
+    if migrated:
+        logger.info(f"已迁移配置文件到 {CONFIG_PATH}，备份路径: {migrated}")
+
+
+_initialize_config_storage()
 
 # 项目路径配置完成
 

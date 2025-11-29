@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 from utils.ui_utils import print_colored, display_menu_multi
 from utils.app_launcher import launch_program
 from utils.config_manager import load_config, get_programs
+from utils.path_utils import get_user_config_path
 
 def main():
     # 检查参数数量
@@ -30,7 +31,7 @@ def main():
                 sys.exit(0)
             
             # 获取配置文件所在目录
-            config_dir = os.path.dirname(os.path.abspath("config.json"))
+            config_dir = str(get_user_config_path().parent)
             
             # 启动所有选中的程序
             for choice in choices:
