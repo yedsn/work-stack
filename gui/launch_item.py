@@ -14,8 +14,9 @@ from utils.logger import get_logger
 from utils.platform_settings import (is_windows, is_mac, is_linux, 
                                     get_platform_style, get_platform_setting)
 from gui.icon_loader import get_icon_loader
+from utils.path_utils import resource_path
 
-RESOURCE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "resources"))
+RESOURCE_DIR = resource_path("resources")
 APP_ICON_DIR = os.path.join(RESOURCE_DIR, "app-icons")
 DEFAULT_ICON_PATH = os.path.join(RESOURCE_DIR, "icon.png")
 

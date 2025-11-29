@@ -9,6 +9,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer
 from gui.main_window import LaunchGUI
 from utils.logger import get_logger
 from utils.single_instance import SingleInstanceManager
+from utils.path_utils import resource_path
 
 # 获取日志记录器
 logger = get_logger("launcher")
@@ -67,7 +68,7 @@ def main():
     app = QApplication(sys.argv)
     
     # 设置应用程序图标
-    icon_path = "resources/icon.png"
+    icon_path = resource_path("resources", "icon.png")
     if not os.path.exists(icon_path):
         logger.warning(f"图标文件 {icon_path} 不存在")
         # 在Mac上，创建一个空图标也比没有图标好

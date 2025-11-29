@@ -1,0 +1,29 @@
+{
+  "categories": ["娱乐", "工作", "文档"],
+  "available_tags": ["默认"],
+  "programs": [
+    {
+      "name": "示例项目",
+      "description": "更新此模板以匹配您的真实启动列表。",
+      "category": "工作",
+      "launch_items": [
+        {
+          "app": "python",
+          "params": ["example.py"],
+          "cwd": "%USERPROFILE%"
+        }
+      ],
+      "tags": ["默认"]
+    }
+  ],
+  "sync_settings": {
+    "provider": "gist",
+    "enabled": false,
+    "local_only_keys": [
+      "tag_filter_state",
+      "window_size",
+      "device_window_sizes",
+      "sync_settings"
+    ]
+  }
+}

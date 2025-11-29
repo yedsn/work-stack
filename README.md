@@ -30,6 +30,13 @@
 pip install -r requirements.txt
 ```
 
+### Windows EXE 打包
+1. 安装 PyInstaller：`pip install pyinstaller`
+2. 运行 `python build_exe.py`（脚本会校验 `main.py`、`resources/`、`config.template.json` 等必需资源并写入版本信息）
+3. 完成后在 `dist/应用启动器/应用启动器.exe` 找到生成的可执行文件，分享前请复制 `config.template.json` 为 `config.json` 并按需定制内容以避免泄露个人配置
+
+> 故障排查：如果提示缺少 PyInstaller 或资源文件，按提示安装依赖或补齐文件后重新运行；打包日志会打印在终端，可附加到评审记录。
+
 ## 使用方法
 
 ### 启动应用

@@ -36,6 +36,7 @@ from utils.config_history import ConfigHistoryManager
 from gui.tag_filter_compact import TagFilterCompact
 from gui.tag_manager_dialog import TagManagerDialog
 from gui.icon_loader import get_icon_loader
+from utils.path_utils import resource_path
 
 # 配置加载器类
 class ConfigLoader(QObject):
@@ -632,7 +633,7 @@ class LaunchGUI(QMainWindow):
         self.setAcceptDrops(True)
         
         # 设置窗口图标
-        self.setWindowIcon(QIcon("resources/icon.png"))
+        self.setWindowIcon(QIcon(resource_path("resources", "icon.png")))
         
         # 添加F5快捷键用于刷新
         refresh_shortcut = QAction("刷新", self)
